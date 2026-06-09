@@ -1,0 +1,17 @@
+[project]
+name = "instrument-mcp"
+version = "0.1.0"
+description = "MCP Server for MXA/CMW/PPK2 instrument control"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp",
+    "pyvisa",
+    "pyserial",
+]
+
+[project.scripts]
+instrument-mcp = "instrument_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
