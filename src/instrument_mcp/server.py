@@ -1,21 +1,10 @@
-import sys
 import logging
-from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any
 
-# ═════════════════════════════════════════════
-# 零侵入桥接：把 Loom 加入 Python 路径
-# ═════════════════════════════════════════════
-LOOM_PATH = Path(r"D:\Projects\Loom")  # 改成你的 Loom 实际路径
-if str(LOOM_PATH) not in sys.path:
-    sys.path.insert(0, str(LOOM_PATH))
-
-# 现在可以像 Loom 内部一样 import
-from core.helpers.keysight_mxa_helper import KeysightMxaHelper
-# from core.helpers.cmw_helper import CMWHelper  # 等你有了再放开
-
 from mcp.server.fastmcp import FastMCP
+
+from instrument_mcp.instruments import KeysightMXA
 
 logger = logging.getLogger(__name__)
 _sessions: Dict[str, Any] = {}
@@ -25,12 +14,11 @@ _sessions: Dict[str, Any] = {}
 async def app_lifespan(server: FastMCP) -> AsyncIterator[Dict]:
     logger.info("[Instrument MCP] Server starting...")
     yield {"sessions": _sessions}
-    # 退出时强制清理
     logger.info("[Instrument MCP] Cleaning up...")
-    for alias, helper in list(_sessions.items()):
+    for alias, inst in list(_sessions.items()):
         try:
-            if hasattr(helper, "close"):
-                helper.close()
+            if hasattr(inst, "close"):
+                inst.close()
         except Exception:
             pass
     _sessions.clear()
@@ -41,27 +29,28 @@ mcp = FastMCP("InstrumentControl", lifespan=app_lifespan)
 
 @mcp.tool()
 def connect_mxa(address: str, alias: str = "mxa") -> str:
-    """连接 Keysight MXA N9020A 频谱仪"""
+    """连接 Keysight MXA N9020A 频谱仪（VISA 地址如 TCPIP0::192.168.1.10::inst0::INSTR）"""
     try:
-        helper = KeysightMxaHelper(address=address)  # 按你实际接口调整
-        helper.open()  # 假设有 open()
-        _sessions[alias] = helper
-        return f"[PASS] MXA 已连接: {address}"
+        inst = KeysightMXA(address=address)
+        inst.open()
+        idn = inst.get_idn()
+        _sessions[alias] = inst
+        return f"[PASS] MXA 已连接: {address} | IDN: {idn}"
     except Exception as e:
         return f"[FAIL] {e}"
 
 
 @mcp.tool()
 def send_scpi(alias: str, command: str, query: bool = False) -> str:
-    """发送 SCPI 命令"""
+    """发送 SCPI 命令到指定别名仪器"""
     if alias not in _sessions:
         return f"[FAIL] 未找到别名 '{alias}'"
-    helper = _sessions[alias]
+    inst = _sessions[alias]
     try:
         if query:
-            resp = helper.query(command)
+            resp = inst.query(command)
             return f"[PASS] {resp}"
-        helper.write(command)
+        inst.write(command)
         return "[PASS] OK"
     except Exception as e:
         return f"[FAIL] {e}"
@@ -69,15 +58,61 @@ def send_scpi(alias: str, command: str, query: bool = False) -> str:
 
 @mcp.tool()
 def disconnect(alias: str) -> str:
-    """断开指定仪器"""
+    """断开指定别名仪器"""
     if alias not in _sessions:
         return f"[WARN] '{alias}' 不存在"
-    helper = _sessions.pop(alias)
+    inst = _sessions.pop(alias)
     try:
-        helper.close()
+        inst.close()
     except Exception:
         pass
     return f"[PASS] {alias} 已断开"
+
+
+@mcp.tool()
+def list_sessions() -> str:
+    """列出当前所有连接的仪器别名"""
+    if not _sessions:
+        return "[INFO] 无活跃连接"
+    return "[PASS] 活跃连接: " + ", ".join(_sessions.keys())
+
+
+@mcp.tool()
+def mxa_preset(alias: str = "mxa") -> str:
+    """MXA 恢复预设状态 (*RST)"""
+    if alias not in _sessions:
+        return f"[FAIL] 未找到别名 '{alias}'"
+    try:
+        _sessions[alias].preset()
+        return "[PASS] MXA preset done"
+    except Exception as e:
+        return f"[FAIL] {e}"
+
+
+@mcp.tool()
+def mxa_set_frequency(alias: str = "mxa", center_hz: float = 1e9, span_hz: float = 1e6) -> str:
+    """设置 MXA 中心频率和扫宽（单位 Hz）"""
+    if alias not in _sessions:
+        return f"[FAIL] 未找到别名 '{alias}'"
+    try:
+        inst = _sessions[alias]
+        inst.set_center_freq(center_hz)
+        inst.set_span(span_hz)
+        return f"[PASS] FREQ:CENT {center_hz} Hz, SPAN {span_hz} Hz"
+    except Exception as e:
+        return f"[FAIL] {e}"
+
+
+@mcp.tool()
+def mxa_peak_search(alias: str = "mxa") -> str:
+    """MXA 执行峰值搜索并返回幅度值"""
+    if alias not in _sessions:
+        return f"[FAIL] 未找到别名 '{alias}'"
+    try:
+        result = _sessions[alias].peak_search()
+        return f"[PASS] Peak: {result} dBm"
+    except Exception as e:
+        return f"[FAIL] {e}"
 
 
 def main():
