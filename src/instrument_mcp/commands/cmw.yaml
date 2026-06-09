@@ -1,8 +1,8 @@
 instrument_type: cmw
 description: R&S CMW500 宽带无线通信测试仪
 
-# 注意：CMW500 需要先激活对应应用（LTE/WCDMA/GPRF 等）才能使用应用命令
-# 应用激活通常通过前面板或 R&S 专用软件完成
+# 注意：CMW500 需要先通过前面板激活对应应用（LTE/WCDMA/GSM 等）
+# 部分命令需要 UE 连接后才能查询到有效数据
 
 model_keywords:
   - "CMW500"
@@ -12,6 +12,9 @@ model_keywords:
   - "SCHWARZ"
 
 commands:
+  # ─────────────────────────────────────────────
+  # 基础控制命令
+  # ─────────────────────────────────────────────
   - name: idn
     description: 读取仪器标识信息
     annotations:
@@ -35,6 +38,13 @@ commands:
     scpi_template:
       query: "*OPC?"
 
+  - name: cmw_cls
+    description: 清除仪器状态
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "*CLS"
+
   - name: cmw_tst
     description: 自检
     annotations:
@@ -51,116 +61,239 @@ commands:
     scpi_template:
       query: "*OPT?"
 
-  - name: cmw_stb
-    description: 读取状态字节
-    annotations:
-      readOnlyHint: true
-    params: []
-    scpi_template:
-      query: "*STB?"
-
-  - name: cmw_esr
-    description: 读取事件状态寄存器
-    annotations:
-      readOnlyHint: true
-    params: []
-    scpi_template:
-      query: "*ESR?"
-
-  - name: cmw_sre
-    description: 读取服务请求使能寄存器
-    annotations:
-      readOnlyHint: true
-    params: []
-    scpi_template:
-      query: "*SRE?"
-
-  - name: cmw_vers
-    description: 读取 SCPI 版本
-    annotations:
-      readOnlyHint: true
-    params: []
-    scpi_template:
-      query: "SYST:VERS?"
-
   - name: cmw_get_error
     description: 读取 CMW 错误队列
     annotations:
       readOnlyHint: true
     params: []
     scpi_template:
-      query: "SYST:ERR:ALL?"
+      query: "SYST:ERR?"
 
-  - name: cmw_clear_status
-    description: 清除仪器状态
-    annotations:
-      destructiveHint: false
-    params: []
-    scpi_template: "*CLS"
-
-  # 以下命令需要激活对应应用后才能使用
-  # 应用激活通常通过 CMW 前面板或 R&S 软件完成
-
+  # ─────────────────────────────────────────────
+  # 小区控制命令
+  # ─────────────────────────────────────────────
   - name: cmw_cell_on
-    description: 打开小区信号（需先激活蜂窝应用）
+    description: 打开 LTE 小区信号
     annotations:
       destructiveHint: false
     params: []
     scpi_template:
-      write: "CALL:CELL:STAT ON"
+      write: "SOURce:LTE:SIGN:CELL:STATe ON"
 
   - name: cmw_cell_off
-    description: 关闭小区信号
+    description: 关闭 LTE 小区信号
     annotations:
       destructiveHint: false
     params: []
     scpi_template:
-      write: "CALL:CELL:STAT OFF"
+      write: "SOURce:LTE:SIGN:CELL:STATe OFF"
 
-  - name: cmw_set_lte_band
-    description: 设置 LTE 工作频段（需激活 LTE 应用）
+  - name: cmw_cell_state
+    description: 查询小区状态
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "SOURce:LTE:SIGN:CELL:STATe?"
+
+  - name: cmw_cell_state_all
+    description: 查询小区完整状态（含调整状态）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "SOURce:LTE:SIGN:CELL:STATe:ALL?"
+
+  # ─────────────────────────────────────────────
+  # 配置命令
+  # ─────────────────────────────────────────────
+  - name: cmw_set_band
+    description: 设置 LTE 频段（如 OB1, OB3, OB7, OB38, OB40, OB41）
     annotations:
       destructiveHint: false
     params:
       - name: band
+        type: string
+        description: 频段标识（如 OB1, OB3, OB7）
+        default: "OB1"
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:PCC:BAND {band}"
+
+  - name: cmw_set_dl_channel
+    description: 设置下行信道号
+    annotations:
+      destructiveHint: false
+    params:
+      - name: channel
         type: integer
-        description: LTE 频段号
-        default: 1
+        description: 下行信道号
+        default: 300
     scpi_template:
-      write: "CONF:LTE:MEAS:BAND {band}"
+      write: "CONFigure:LTE:SIGN:RFSettings:PCC:CHANnel:DL {channel}"
 
-  - name: cmw_set_frequency
-    description: 设置频率（需激活对应应用）
+  - name: cmw_set_ul_channel
+    description: 设置上行信道号
     annotations:
       destructiveHint: false
     params:
-      - name: freq_hz
-        type: number
-        description: 频率（Hz）
-        default: 2140000000
+      - name: channel
+        type: integer
+        description: 上行信道号
+        default: 18300
     scpi_template:
-      write: "CONF:LTE:MEAS:FREQ {freq_hz}"
-
-  - name: cmw_set_power
-    description: 设置输出功率（需激活对应应用）
-    annotations:
-      destructiveHint: false
-    params:
-      - name: power_dbm
-        type: number
-        description: 输出功率（dBm）
-        default: -70
-    scpi_template:
-      write: "CONF:LTE:MEAS:POW {power_dbm}"
+      write: "CONFigure:LTE:SIGN:RFSettings:PCC:CHANnel:UL {channel}"
 
   - name: cmw_set_bandwidth
-    description: 设置信道带宽（需激活 LTE 应用）
+    description: 设置 LTE 信道带宽（RB数格式：B100=20MHz, B50=10MHz, B25=5MHz, B15=3MHz, B6=1.4MHz）
     annotations:
       destructiveHint: false
     params:
-      - name: bw_mhz
-        type: number
-        description: 带宽（MHz）
-        default: 20
+      - name: rb_count
+        type: string
+        description: 资源块数量（B100, B50, B25, B15, B6）
+        default: "B100"
     scpi_template:
-      write: "CONF:LTE:MEAS:BW {bw_mhz}"
+      write: "CONFigure:LTE:SIGN:CELL:BANDwidth:PCC:DL {rb_count}"
+
+  - name: cmw_set_input_attenuation
+    description: 设置输入衰减
+    annotations:
+      destructiveHint: false
+    params:
+      - name: att_db
+        type: number
+        description: 衰减值（dB）
+        default: 0
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:RFSettings:EATTenuation:INPut {att_db}"
+
+  - name: cmw_set_tpc_mode
+    description: 设置上行功率控制模式
+    annotations:
+      destructiveHint: false
+    params:
+      - name: mode
+        type: string
+        description: 功率控制模式（CLOop, OPEn, MAXPower, MINPower）
+        default: "CLOop"
+    scpi_template:
+      write: "CONFigure:LTE:SIGNaling:UL:PCC:PUSCh:TPC:SET {mode}"
+
+  # ─────────────────────────────────────────────
+  # 查询命令
+  # ─────────────────────────────────────────────
+  - name: cmw_query_dl_frequency
+    description: 查询下行频率
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:RFSettings:PCC:FREQuency:DL?"
+
+  - name: cmw_query_ul_frequency
+    description: 查询上行频率
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:RFSettings:PCC:FREQuency:UL?"
+
+  # ─────────────────────────────────────────────
+  # 连接控制命令
+  # ─────────────────────────────────────────────
+  - name: cmw_connect_ue
+    description: 连接 UE（建立 RRC 连接）
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template:
+      write: "CALL:LTE:SIGN:PSWitched:ACTion CONNect"
+
+  - name: cmw_disconnect_ue
+    description: 断开 UE 连接
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template:
+      write: "CALL:LTE:SIGN:PSWitched:ACTion DISConnect"
+
+  - name: cmw_query_connection_state
+    description: 查询 UE 连接状态
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "FETCh:LTE:SIGN:PSWitched:STATe?"
+
+  # ─────────────────────────────────────────────
+  # 测量命令
+  # ─────────────────────────────────────────────
+  - name: cmw_init_measurement
+    description: 触发测量
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template:
+      write: "INITiate:IMMediate"
+
+  - name: cmw_abort_measurement
+    description: 中止测量
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template:
+      write: "ABORT:LTE:MEASurement:MEValuation"
+
+  # ─────────────────────────────────────────────
+  # 路由配置
+  # ─────────────────────────────────────────────
+  - name: cmw_set_meas_port
+    description: 设置测量信号路径/端口
+    annotations:
+      destructiveHint: false
+    params:
+      - name: scenario
+        type: string
+        description: 路由场景
+        default: "SAL"
+    scpi_template:
+      write: "ROUTe:LTE:MEAS:SCENario {scenario}"
+
+  - name: cmw_set_sign_port
+    description: 设置信令信号路径/端口
+    annotations:
+      destructiveHint: false
+    params:
+      - name: scenario
+        type: string
+        description: 路由场景
+        default: "SAL"
+    scpi_template:
+      write: "ROUTe:LTE:SIGN:SCENario {scenario}"
+
+  # ─────────────────────────────────────────────
+  # 文件操作
+  # ─────────────────────────────────────────────
+  - name: cmw_memory_catalog
+    description: 查询仪器内部文件目录
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "MMEMory:CATalog?"
+
+  - name: cmw_recall_state
+    description: 从文件加载仪器状态
+    annotations:
+      destructiveHint: true
+    params:
+      - name: slot
+        type: integer
+        description: 状态寄存器槽位
+        default: 1
+      - name: filename
+        type: string
+        description: 文件名
+        default: "default"
+    scpi_template:
+      write: "MMEMory:RCL {slot},\"{filename}\""
