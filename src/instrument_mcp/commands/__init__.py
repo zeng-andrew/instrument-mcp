@@ -5,9 +5,8 @@
 
 import json
 import logging
-import pkgutil
 from pathlib import Path
-from typing import Any, Dict, Callable, Optional
+from typing import Any, Dict, Optional
 
 try:
     import yaml
@@ -22,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 # 已注册的 tools 缓存（用于 list / invoke）
 _TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {}
+
+# 型号 -> 配置 映射（用于自适应）
+_MODEL_CONFIG_MAP: Dict[str, Dict[str, Any]] = {}
 
 
 def _load_yaml(path: Path) -> dict:
@@ -50,6 +52,36 @@ def _build_pydantic_model(cmd_name: str, params: list) -> type:
     return create_model(f"{cmd_name}_params", **fields, __base__=BaseModel)
 
 
+def _execute_scpi(inst, scpi: Any, kwargs: dict, entry: dict) -> str:
+    """执行 SCPI 模板，返回结果字符串。"""
+    if isinstance(scpi, str):
+        formatted = scpi.format(**kwargs) if kwargs else scpi
+        inst.write(formatted)
+        entry["status"] = "ok"
+        return f"[PASS] {formatted}"
+
+    elif isinstance(scpi, dict):
+        if "write" in scpi:
+            w_cmd = scpi["write"].format(**kwargs) if kwargs else scpi["write"]
+            inst.write(w_cmd)
+        if "query" in scpi:
+            q_cmd = scpi["query"].format(**kwargs) if kwargs else scpi["query"]
+            resp = inst.query(q_cmd)
+            entry["status"] = "ok"
+            return f"[PASS] {resp}"
+        entry["status"] = "ok"
+        return "[PASS] OK"
+
+    elif isinstance(scpi, list):
+        for template in scpi:
+            cmd = template.format(**kwargs) if kwargs else template
+            inst.write(cmd)
+        entry["status"] = "ok"
+        return "[PASS] OK"
+
+    raise ValueError(f"Unsupported scpi_template type: {type(scpi)}")
+
+
 def _make_tool_handler(
     cmd_name: str,
     cmd_def: dict,
@@ -74,50 +106,21 @@ def _make_tool_handler(
                 return f"[FAIL] params_json 解析错误: {e}"
 
         # 记录调用历史
-        command_history.append(
-            {
-                "alias": alias,
-                "command": cmd_name,
-                "params": kwargs,
-                "status": "running",
-            }
-        )
-        entry = command_history[-1]
+        entry = {
+            "alias": alias,
+            "command": cmd_name,
+            "params": kwargs,
+            "status": "running",
+        }
+        command_history.append(entry)
 
         try:
             # SCPI 模板驱动
             if scpi:
-                if isinstance(scpi, str):
-                    # 纯写命令
-                    formatted = scpi.format(**kwargs) if kwargs else scpi
-                    inst.write(formatted)
-                    entry["status"] = "ok"
-                    return f"[PASS] {formatted}"
-
-                elif isinstance(scpi, dict):
-                    # write + query 组合
-                    if "write" in scpi:
-                        w_cmd = scpi["write"].format(**kwargs) if kwargs else scpi["write"]
-                        inst.write(w_cmd)
-                    if "query" in scpi:
-                        q_cmd = scpi["query"].format(**kwargs) if kwargs else scpi["query"]
-                        resp = inst.query(q_cmd)
-                        entry["status"] = "ok"
-                        return f"[PASS] {resp}"
-                    entry["status"] = "ok"
-                    return "[PASS] OK"
-
-                elif isinstance(scpi, list):
-                    # 多条命令顺序执行
-                    for template in scpi:
-                        cmd = template.format(**kwargs) if kwargs else template
-                        inst.write(cmd)
-                    entry["status"] = "ok"
-                    return "[PASS] OK"
+                return _execute_scpi(inst, scpi, kwargs, entry)
 
             # 自定义 handler（预留扩展点）
             if handler:
-                # 例如 handler: "instrument_mcp.custom_handlers.mxa_special"
                 module_path, func_name = handler.rsplit(".", 1)
                 mod = __import__(module_path, fromlist=[func_name])
                 func = getattr(mod, func_name)
@@ -130,9 +133,45 @@ def _make_tool_handler(
 
         except Exception as e:
             entry["status"] = f"error: {e}"
-            return f"[FAIL] {e}"
+            # 尝试读取仪器错误队列获取更详细信息
+            try:
+                err = inst.query("SYST:ERR?")
+                entry["instrument_error"] = err
+                return f"[FAIL] {e} | 仪器错误: {err}"
+            except Exception:
+                return f"[FAIL] {e}"
 
     return _handler
+
+
+def _index_model_keywords(config: dict) -> None:
+    """建立型号关键字到配置的索引。"""
+    inst_type = config.get("instrument_type", "unknown")
+    for kw in config.get("model_keywords", []):
+        _MODEL_CONFIG_MAP[kw.upper()] = config
+    # 也按 instrument_type 索引
+    _MODEL_CONFIG_MAP[inst_type.upper()] = config
+
+
+def discover_instrument_model(idn: str) -> Optional[str]:
+    """根据 *IDN? 响应识别仪器型号，返回 instrument_type。
+
+    IDN 格式示例: "Keysight Technologies,N9020A,MY12345678,A.12.34"
+    """
+    idn_upper = idn.upper()
+    for keyword, config in _MODEL_CONFIG_MAP.items():
+        if keyword in idn_upper:
+            return config.get("instrument_type")
+    return None
+
+
+def get_commands_for_model(instrument_type: str) -> list:
+    """获取指定仪器类型的所有命令定义。"""
+    result = []
+    for name, meta in _TOOL_REGISTRY.items():
+        if meta["instrument_type"] == instrument_type or meta["instrument_type"] == "generic":
+            result.append({"name": name, **meta})
+    return result
 
 
 def register_commands_from_yaml(
@@ -152,20 +191,22 @@ def register_commands_from_yaml(
     if yaml_path:
         configs = [_load_yaml(yaml_path)]
     else:
-        # 加载包内所有 yaml
         configs = []
         pkg_path = Path(__file__).parent
-        for f in pkg_path.glob("*.yaml"):
+        for f in sorted(pkg_path.glob("*.yaml")):
             configs.append(_load_yaml(f))
 
     for config in configs:
         inst_type = config.get("instrument_type", "unknown")
+        # 建立型号索引
+        _index_model_keywords(config)
+
         for cmd in config.get("commands", []):
             cmd_name = cmd["name"]
 
             # 生成 Pydantic 模型用于参数校验
             params = cmd.get("params", [])
-            _build_pydantic_model(cmd_name, params)  # 校验用，暂不绑定
+            _build_pydantic_model(cmd_name, params)
 
             # 构建 handler
             handler = _make_tool_handler(
@@ -194,3 +235,7 @@ def register_commands_from_yaml(
 
 def get_tool_registry() -> Dict[str, Dict[str, Any]]:
     return dict(_TOOL_REGISTRY)
+
+
+def get_model_config_map() -> Dict[str, Dict[str, Any]]:
+    return dict(_MODEL_CONFIG_MAP)

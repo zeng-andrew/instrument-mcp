@@ -4,7 +4,12 @@ from typing import AsyncIterator, Dict, Any
 
 from mcp.server.fastmcp import FastMCP
 
-from instrument_mcp.commands import register_commands_from_yaml, get_tool_registry
+from instrument_mcp.commands import (
+    register_commands_from_yaml,
+    get_tool_registry,
+    discover_instrument_model,
+    get_commands_for_model,
+)
 
 logger = logging.getLogger(__name__)
 _sessions: Dict[str, Any] = {}
@@ -32,41 +37,65 @@ mcp = FastMCP("InstrumentControl", lifespan=app_lifespan)
 # 通用连接 / 断开 / 会话管理
 # ─────────────────────────────────────────────
 @mcp.tool()
-def connect(address: str, instrument_type: str = "mxa", alias: str = "default") -> str:
-    """连接仪器（根据 instrument_type 自动选择驱动类，并读取 *IDN? 识别型号）"""
+def connect(address: str, instrument_type: str = "auto", alias: str = "default") -> str:
+    """连接仪器（自动识别型号，instrument_type='auto' 时根据 *IDN? 推断）"""
     from instrument_mcp.instruments import VisaInstrument, INSTRUMENT_REGISTRY
 
-    if instrument_type not in INSTRUMENT_REGISTRY:
-        supported = ", ".join(INSTRUMENT_REGISTRY.keys())
-        return f"[FAIL] 不支持的仪器类型 '{instrument_type}'，支持: {supported}"
-
-    cls, desc = INSTRUMENT_REGISTRY[instrument_type]
+    # 先用通用驱动连接
     try:
-        inst = cls(address=address)
+        inst = VisaInstrument(address=address)
         inst.open()
-
-        # 读取仪器标识
-        idn = "N/A"
-        try:
-            idn = inst.query("*IDN?").strip()
-            logger.info(f"[{alias}] IDN: {idn}")
-        except Exception as e:
-            logger.warning(f"[{alias}] 无法读取 IDN: {e}")
-
-        _sessions[alias] = inst
-
-        # 记录连接信息
-        _command_history.append({
-            "action": "connect",
-            "alias": alias,
-            "address": address,
-            "instrument_type": instrument_type,
-            "idn": idn,
-        })
-
-        return f"[PASS] {desc} 已连接: {address} | IDN: {idn}"
     except Exception as e:
-        return f"[FAIL] {e}"
+        return f"[FAIL] 连接失败: {e}"
+
+    # 读取仪器标识
+    idn = "N/A"
+    try:
+        idn = inst.query("*IDN?").strip()
+        logger.info(f"[{alias}] IDN: {idn}")
+    except Exception as e:
+        logger.warning(f"[{alias}] 无法读取 IDN: {e}")
+
+    # 自动识别型号
+    detected_type = None
+    if instrument_type == "auto":
+        detected_type = discover_instrument_model(idn)
+        if detected_type:
+            logger.info(f"[{alias}] 自动识别为: {detected_type}")
+        else:
+            logger.warning(f"[{alias}] 无法识别型号，使用 generic 驱动")
+            detected_type = "generic"
+    else:
+        detected_type = instrument_type
+
+    # 检查是否支持
+    if detected_type not in INSTRUMENT_REGISTRY:
+        inst.close()
+        supported = ", ".join(INSTRUMENT_REGISTRY.keys())
+        return f"[FAIL] 不支持的仪器类型 '{detected_type}'，支持: {supported}"
+
+    _sessions[alias] = inst
+
+    # 记录连接信息
+    _command_history.append({
+        "action": "connect",
+        "alias": alias,
+        "address": address,
+        "instrument_type": detected_type,
+        "idn": idn,
+    })
+
+    # 获取该型号的可用命令
+    cmds = get_commands_for_model(detected_type)
+    cmd_list = ", ".join([c["name"] for c in cmds[:5]]) + ("..." if len(cmds) > 5 else "")
+
+    return (
+        f"[PASS] 已连接: {address}\n"
+        f"  IDN: {idn}\n"
+        f"  识别型号: {detected_type}\n"
+        f"  可用命令数: {len(cmds)}\n"
+        f"  示例命令: {cmd_list}"
+    )
 
 
 @mcp.tool()
@@ -105,15 +134,103 @@ def get_history(limit: int = 10) -> str:
 
 
 @mcp.tool()
-def get_available_tools() -> str:
-    """列出当前可用的所有命令及其描述"""
+def get_available_tools(instrument_type: str = "") -> str:
+    """列出当前可用的所有命令及其描述，可指定仪器类型过滤"""
     registry = get_tool_registry()
     if not registry:
         return "[INFO] 无可用命令"
+
+    if instrument_type:
+        cmds = get_commands_for_model(instrument_type)
+        lines = [f"- {c['name']}: {c['description']}" for c in cmds]
+        return f"[PASS] {instrument_type} 可用命令 ({len(cmds)}个):\n" + "\n".join(lines)
+
     lines = []
     for name, meta in registry.items():
-        lines.append(f"- {name}: {meta['description']}")
-    return "[PASS] 可用命令:\n" + "\n".join(lines)
+        lines.append(f"- [{meta['instrument_type']}] {name}: {meta['description']}")
+    return f"[PASS] 全部可用命令 ({len(registry)}个):\n" + "\n".join(lines)
+
+
+@mcp.tool()
+def discover_my_instrument(alias: str = "default") -> str:
+    """重新识别指定别名仪器的型号，并推荐可用命令"""
+    if alias not in _sessions:
+        return f"[FAIL] 未找到别名 '{alias}'"
+
+    inst = _sessions[alias]
+    try:
+        idn = inst.query("*IDN?").strip()
+    except Exception as e:
+        return f"[FAIL] 无法读取 IDN: {e}"
+
+    detected = discover_instrument_model(idn)
+    if not detected:
+        return (
+            f"[WARN] 无法识别型号\n"
+            f"  IDN: {idn}\n"
+            f"  建议: 使用 scpi_query 手动探索命令，"
+            f"或将型号关键字添加到对应 YAML 的 model_keywords 中"
+        )
+
+    cmds = get_commands_for_model(detected)
+    cmd_lines = [f"  - {c['name']}: {c['description']}" for c in cmds]
+
+    return (
+        f"[PASS] 识别结果\n"
+        f"  IDN: {idn}\n"
+        f"  型号: {detected}\n"
+        f"  推荐命令 ({len(cmds)}个):\n" + "\n".join(cmd_lines)
+    )
+
+
+@mcp.tool()
+def debug_last_error(alias: str = "default") -> str:
+    """调试最后一个失败的命令：读取仪器错误队列并给出建议"""
+    if alias not in _sessions:
+        return f"[FAIL] 未找到别名 '{alias}'"
+
+    # 找最近一个失败的记录
+    failed = None
+    for entry in reversed(_command_history):
+        if entry.get("status", "").startswith("error"):
+            failed = entry
+            break
+
+    if not failed:
+        return "[INFO] 历史记录中没有失败的命令"
+
+    inst = _sessions[alias]
+    errors = []
+    try:
+        # 读取错误队列（最多读 10 条）
+        for _ in range(10):
+            err = inst.query("SYST:ERR?").strip()
+            if err.startswith("+0,") or err.startswith("0,"):
+                break
+            errors.append(err)
+    except Exception as e:
+        return f"[FAIL] 读取错误队列失败: {e}"
+
+    result = (
+        f"[PASS] 调试信息\n"
+        f"  失败命令: {failed.get('command')}\n"
+        f"  参数: {failed.get('params')}\n"
+        f"  仪器错误队列:\n"
+    )
+    if errors:
+        for err in errors:
+            result += f"    - {err}\n"
+    else:
+        result += "    (无错误)\n"
+
+    # 给出建议
+    result += "\n  建议:\n"
+    result += "    1. 检查命令参数类型（如数字不要加引号）\n"
+    result += "    2. 使用 discover_my_instrument 确认仪器型号\n"
+    result += "    3. 使用 scpi_query 发送 *IDN? 确认通信正常\n"
+    result += "    4. 查阅仪器编程手册确认 SCPI 语法\n"
+
+    return result
 
 
 # ─────────────────────────────────────────────
