@@ -5,6 +5,7 @@ from typing import AsyncIterator, Dict, Any
 from mcp.server.fastmcp import FastMCP
 
 from instrument_mcp.instruments import KeysightMXA
+from instrument_mcp.tools import INSTRUMENT_REGISTRY, COMMAND_REGISTRY
 
 logger = logging.getLogger(__name__)
 _sessions: Dict[str, Any] = {}
@@ -27,37 +28,28 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[Dict]:
 mcp = FastMCP("InstrumentControl", lifespan=app_lifespan)
 
 
+# ─────────────────────────────────────────────
+# 通用连接 / 断开 / 会话管理
+# ─────────────────────────────────────────────
 @mcp.tool()
-def connect_mxa(address: str, alias: str = "mxa") -> str:
-    """连接 Keysight MXA N9020A 频谱仪（VISA 地址如 TCPIP0::192.168.1.10::inst0::INSTR）"""
+def connect(address: str, instrument_type: str = "mxa", alias: str = "default") -> str:
+    """连接仪器（根据 instrument_type 自动选择驱动类）"""
+    if instrument_type not in INSTRUMENT_REGISTRY:
+        supported = ", ".join(INSTRUMENT_REGISTRY.keys())
+        return f"[FAIL] 不支持的仪器类型 '{instrument_type}'，支持: {supported}"
+    cls, desc = INSTRUMENT_REGISTRY[instrument_type]
     try:
-        inst = KeysightMXA(address=address)
+        inst = cls(address=address)
         inst.open()
-        idn = inst.get_idn()
+        idn = inst.get_idn() if hasattr(inst, "get_idn") else "N/A"
         _sessions[alias] = inst
-        return f"[PASS] MXA 已连接: {address} | IDN: {idn}"
+        return f"[PASS] {desc} 已连接: {address} | IDN: {idn}"
     except Exception as e:
         return f"[FAIL] {e}"
 
 
 @mcp.tool()
-def send_scpi(alias: str, command: str, query: bool = False) -> str:
-    """发送 SCPI 命令到指定别名仪器"""
-    if alias not in _sessions:
-        return f"[FAIL] 未找到别名 '{alias}'"
-    inst = _sessions[alias]
-    try:
-        if query:
-            resp = inst.query(command)
-            return f"[PASS] {resp}"
-        inst.write(command)
-        return "[PASS] OK"
-    except Exception as e:
-        return f"[FAIL] {e}"
-
-
-@mcp.tool()
-def disconnect(alias: str) -> str:
+def disconnect(alias: str = "default") -> str:
     """断开指定别名仪器"""
     if alias not in _sessions:
         return f"[WARN] '{alias}' 不存在"
@@ -74,45 +66,79 @@ def list_sessions() -> str:
     """列出当前所有连接的仪器别名"""
     if not _sessions:
         return "[INFO] 无活跃连接"
-    return "[PASS] 活跃连接: " + ", ".join(_sessions.keys())
+    lines = []
+    for alias, inst in _sessions.items():
+        inst_type = type(inst).__name__
+        lines.append(f"{alias} ({inst_type})")
+    return "[PASS] 活跃连接:\n" + "\n".join(lines)
 
 
+# ─────────────────────────────────────────────
+# 通用 SCPI 透传
+# ─────────────────────────────────────────────
 @mcp.tool()
-def mxa_preset(alias: str = "mxa") -> str:
+def scpi(alias: str = "default", command: str = "", query: bool = False) -> str:
+    """发送 SCPI 命令到指定别名仪器"""
+    if alias not in _sessions:
+        return f"[FAIL] 未找到别名 '{alias}'"
+    inst = _sessions[alias]
+    try:
+        if query:
+            resp = inst.query(command)
+            return f"[PASS] {resp}"
+        inst.write(command)
+        return "[PASS] OK"
+    except Exception as e:
+        return f"[FAIL] {e}"
+
+
+# ─────────────────────────────────────────────
+# 高层命令：自动分发到 COMMAND_REGISTRY
+# ─────────────────────────────────────────────
+@mcp.tool()
+def run_command(alias: str = "default", command: str = "", params: str = "") -> str:
+    """执行已注册的高层命令（params 为 JSON 字符串，可选）"""
+    if alias not in _sessions:
+        return f"[FAIL] 未找到别名 '{alias}'"
+    if command not in COMMAND_REGISTRY:
+        supported = ", ".join(COMMAND_REGISTRY.keys())
+        return f"[FAIL] 未知命令 '{command}'，支持: {supported}"
+
+    import json
+    kwargs = {}
+    if params:
+        try:
+            kwargs = json.loads(params)
+        except Exception as e:
+            return f"[FAIL] params JSON 解析错误: {e}"
+
+    inst = _sessions[alias]
+    try:
+        return COMMAND_REGISTRY[command](inst, **kwargs)
+    except Exception as e:
+        return f"[FAIL] {e}"
+
+
+# ─────────────────────────────────────────────
+# 便捷入口：直接暴露常用命令（内部调用 run_command）
+# ─────────────────────────────────────────────
+@mcp.tool()
+def mxa_preset(alias: str = "default") -> str:
     """MXA 恢复预设状态 (*RST)"""
-    if alias not in _sessions:
-        return f"[FAIL] 未找到别名 '{alias}'"
-    try:
-        _sessions[alias].preset()
-        return "[PASS] MXA preset done"
-    except Exception as e:
-        return f"[FAIL] {e}"
+    return run_command(alias, command="mxa_preset")
 
 
 @mcp.tool()
-def mxa_set_frequency(alias: str = "mxa", center_hz: float = 1e9, span_hz: float = 1e6) -> str:
+def mxa_set_frequency(alias: str = "default", center_hz: float = 1e9, span_hz: float = 1e6) -> str:
     """设置 MXA 中心频率和扫宽（单位 Hz）"""
-    if alias not in _sessions:
-        return f"[FAIL] 未找到别名 '{alias}'"
-    try:
-        inst = _sessions[alias]
-        inst.set_center_freq(center_hz)
-        inst.set_span(span_hz)
-        return f"[PASS] FREQ:CENT {center_hz} Hz, SPAN {span_hz} Hz"
-    except Exception as e:
-        return f"[FAIL] {e}"
+    import json
+    return run_command(alias, command="mxa_set_frequency", params=json.dumps({"center_hz": center_hz, "span_hz": span_hz}))
 
 
 @mcp.tool()
-def mxa_peak_search(alias: str = "mxa") -> str:
+def mxa_peak_search(alias: str = "default") -> str:
     """MXA 执行峰值搜索并返回幅度值"""
-    if alias not in _sessions:
-        return f"[FAIL] 未找到别名 '{alias}'"
-    try:
-        result = _sessions[alias].peak_search()
-        return f"[PASS] Peak: {result} dBm"
-    except Exception as e:
-        return f"[FAIL] {e}"
+    return run_command(alias, command="mxa_peak_search")
 
 
 def main():
