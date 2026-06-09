@@ -61,8 +61,15 @@ class VisaInstrument:
         self.close()
 
 
+# 仪器注册表：新增仪器时在此注册
+INSTRUMENT_REGISTRY = {
+    "mxa": (VisaInstrument, "Keysight MXA / EXA 系列频谱仪（通用 VISA 驱动）"),
+    "generic": (VisaInstrument, "通用 SCPI 仪器"),
+}
+
+
 class KeysightMXA(VisaInstrument):
-    """Keysight MXA N9020A 频谱仪。"""
+    """Keysight MXA N9020A 频谱仪（保留用于需要自定义方法的场景）。"""
 
     def get_idn(self) -> str:
         return self.query("*IDN?")

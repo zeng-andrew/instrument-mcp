@@ -1,0 +1,181 @@
+instrument_type: mxa
+description: Keysight MXA N9020A / N9010A / EXA 等 X 系列频谱仪
+
+# 型号识别：连接后读取 *IDN? 匹配关键字
+model_keywords:
+  - "N9020A"
+  - "N9010A"
+  - "N9000A"
+  - "MXA"
+  - "EXA"
+
+commands:
+  - name: idn
+    description: 读取仪器标识信息（制造商、型号、序列号、固件版本）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "*IDN?"
+
+  - name: mxa_preset
+    description: 恢复仪器到预设状态（*RST），会清除所有当前设置和测量数据
+    annotations:
+      destructiveHint: true
+      readOnlyHint: false
+    params: []
+    scpi_template: "*RST"
+
+  - name: mxa_set_frequency
+    description: 设置中心频率和频率扫宽
+    annotations:
+      destructiveHint: false
+    params:
+      - name: center_hz
+        type: number
+        description: 中心频率，单位 Hz（如 1e9 = 1GHz）
+        default: 1000000000
+      - name: span_hz
+        type: number
+        description: 频率扫宽，单位 Hz（如 1e6 = 1MHz，0 = 零扫宽）
+        default: 1000000
+    scpi_template:
+      - "FREQ:CENT {center_hz}"
+      - "FREQ:SPAN {span_hz}"
+
+  - name: mxa_set_rbw
+    description: 设置分辨率带宽（RBW）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: rbw_hz
+        type: number
+        description: RBW 值，单位 Hz（-1 表示自动）
+        default: -1
+    scpi_template:
+      query: "BAND:RES?"
+      write: "BAND:RES {rbw_hz}"
+
+  - name: mxa_set_vbw
+    description: 设置视频带宽（VBW）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: vbw_hz
+        type: number
+        description: VBW 值，单位 Hz（-1 表示自动）
+        default: -1
+    scpi_template:
+      query: "BAND:VID?"
+      write: "BAND:VID {vbw_hz}"
+
+  - name: mxa_set_ref_level
+    description: 设置参考电平
+    annotations:
+      destructiveHint: false
+    params:
+      - name: level_dbm
+        type: number
+        description: 参考电平值，单位 dBm
+        default: 0
+    scpi_template: "DISP:WIND:TRAC:Y:RLEV {level_dbm}"
+
+  - name: mxa_set_attenuation
+    description: 设置输入衰减器
+    annotations:
+      destructiveHint: false
+    params:
+      - name: att_db
+        type: number
+        description: 衰减值 dB（-1 表示自动）
+        default: -1
+    scpi_template: "POW:ATT {att_db}"
+
+  - name: mxa_peak_search
+    description: 执行峰值搜索并返回峰值频率和幅度
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      write: "CALC:MARK:MAX"
+      query: "CALC:MARK:Y?"
+
+  - name: mxa_read_marker
+    description: 读取当前标记点的幅度值（不移动标记）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CALC:MARK:Y?"
+
+  - name: mxa_read_trace
+    description: 读取当前迹线的数据点
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "TRAC:DATA? TRACE1"
+
+  - name: mxa_sweep_single
+    description: 执行单次扫描并等待完成
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      write: "INIT:CONT OFF"
+      query: "*OPC?"
+
+  - name: mxa_sweep_continuous
+    description: 设置为连续扫描模式
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "INIT:CONT ON"
+
+  - name: mxa_set_detector
+    description: 设置检波器类型
+    annotations:
+      destructiveHint: false
+    params:
+      - name: detector
+        type: string
+        description: 检波器类型（NORMAL, AVERAGE, PEAK, NEGATIVE, SAMPLE）
+        default: "NORMAL"
+    scpi_template: "DET:TRAC1 {detector}"
+
+  - name: mxa_set_averaging
+    description: 设置平均次数
+    annotations:
+      destructiveHint: false
+    params:
+      - name: count
+        type: integer
+        description: 平均次数（1-10000，1=关闭平均）
+        default: 1
+    scpi_template: "AVER:COUN {count}"
+
+  - name: mxa_set_trace_mode
+    description: 设置迹线模式
+    annotations:
+      destructiveHint: false
+    params:
+      - name: mode
+        type: string
+        description: 迹线模式（WRITe, MAXHold, MINHold, VIEW, BLANk）
+        default: "WRITE"
+    scpi_template: "TRAC1:MODE {mode}"
+
+  - name: mxa_get_error
+    description: 读取仪器错误队列
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "SYST:ERR?"
+
+  - name: mxa_clear_status
+    description: 清除仪器状态（*CLS）
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "*CLS"

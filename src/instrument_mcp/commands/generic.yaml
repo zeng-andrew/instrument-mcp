@@ -1,0 +1,51 @@
+instrument_type: generic
+description: 通用 VISA 仪器命令（适用于所有支持 SCPI 的仪器）
+
+# 通用命令不绑定特定型号
+model_keywords: []
+
+commands:
+  - name: scpi_write
+    description: 发送任意 SCPI 写命令
+    annotations:
+      destructiveHint: false
+    params:
+      - name: command
+        type: string
+        description: SCPI 命令字符串
+    scpi_template:
+      write: "{command}"
+
+  - name: scpi_query
+    description: 发送任意 SCPI 查询命令并读取响应
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: command
+        type: string
+        description: SCPI 查询命令字符串（必须以 ? 结尾）
+    scpi_template:
+      query: "{command}"
+
+  - name: opc
+    description: 等待操作完成（*OPC?）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "*OPC?"
+
+  - name: cls
+    description: 清除仪器状态（*CLS）
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "*CLS"
+
+  - name: esr
+    description: 读取事件状态寄存器（*ESR?）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "*ESR?"
