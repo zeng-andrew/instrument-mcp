@@ -204,11 +204,11 @@ def register_commands_from_yaml(
         cwd = Path(os.getcwd())
         project_custom_dir = cwd / ".instrument_mcp"
         if project_custom_dir.exists():
-            logger.info(f"Loading project custom commands from: {project_custom_dir}")
+            logger.debug(f"Loading project custom commands from: {project_custom_dir}")
             for f in sorted(project_custom_dir.glob("*.yaml")):
                 try:
                     configs.append(_load_yaml(f))
-                    logger.info(f"Loaded project custom command: {f.name}")
+                    logger.debug(f"Loaded project custom command: {f.name}")
                 except Exception as e:
                     logger.warning(f"Failed to load {f}: {e}")
 
@@ -217,15 +217,15 @@ def register_commands_from_yaml(
         if custom_dir:
             custom_path = Path(custom_dir)
             if custom_path.exists():
-                logger.info(f"Loading user custom commands from: {custom_path}")
+                logger.debug(f"Loading user custom commands from: {custom_path}")
                 for f in sorted(custom_path.glob("*.yaml")):
                     try:
                         configs.append(_load_yaml(f))
-                        logger.info(f"Loaded user custom command: {f.name}")
+                        logger.debug(f"Loaded user custom command: {f.name}")
                     except Exception as e:
                         logger.warning(f"Failed to load {f}: {e}")
             else:
-                logger.warning(f"Custom commands directory not found: {custom_path}")
+                logger.debug(f"Custom commands directory not found: {custom_path}")
 
     for config in configs:
         inst_type = config.get("instrument_type", "unknown")
@@ -261,7 +261,7 @@ def register_commands_from_yaml(
                 "scpi_template": cmd.get("scpi_template"),
             }
 
-            logger.info(f"Registered tool: {cmd_name} ({inst_type})")
+            logger.debug(f"Registered tool: {cmd_name} ({inst_type})")
 
 
 def get_tool_registry() -> Dict[str, Dict[str, Any]]:

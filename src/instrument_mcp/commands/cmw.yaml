@@ -15,7 +15,7 @@ commands:
   # ─────────────────────────────────────────────
   # 基础控制命令
   # ─────────────────────────────────────────────
-  - name: idn
+  - name: cmw_idn
     description: 读取仪器标识信息
     annotations:
       readOnlyHint: true

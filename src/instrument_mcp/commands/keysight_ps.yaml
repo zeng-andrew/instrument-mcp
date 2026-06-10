@@ -12,7 +12,7 @@ commands:
   # ─────────────────────────────────────────────
   # 基础控制
   # ─────────────────────────────────────────────
-  - name: idn
+  - name: ps_idn
     description: 读取仪器标识信息
     annotations:
       readOnlyHint: true

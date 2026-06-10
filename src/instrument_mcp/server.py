@@ -399,6 +399,9 @@ def save_learned_command(
     custom_dir = cwd / ".instrument_mcp"
     custom_dir.mkdir(exist_ok=True)
 
+    logger.info(f"[save_learned_command] Working directory: {cwd}")
+    logger.info(f"[save_learned_command] Saving to: {custom_dir / f'{instrument_type}.yaml'}")
+
     filepath = custom_dir / f"{instrument_type}.yaml"
 
     try:
@@ -498,6 +501,10 @@ def init_project_commands() -> str:
     custom_dir = cwd / ".instrument_mcp"
     custom_dir.mkdir(exist_ok=True)
 
+    # 记录创建/使用的工作目录
+    logger.info(f"[init_project_commands] Working directory: {cwd}")
+    logger.info(f"[init_project_commands] Custom commands dir: {custom_dir}")
+
     builtin_dir = Path(__file__).parent / "commands"
     copied = []
     if builtin_dir.exists():
@@ -520,15 +527,17 @@ def init_project_commands() -> str:
         file_list = "\n".join([f"    - {f}" for f in copied])
         return (
             f"[PASS] 项目命令目录已初始化:\n"
-            f"  路径: {custom_dir}\n"
+            f"  工作目录: {cwd}\n"
+            f"  命令目录: {custom_dir}\n"
             f"  已复制内置 YAML ({len(copied)}个):\n{file_list}\n"
-            f"  提示: 直接编辑这些 YAML 文件即可自定义命令"
+            f"  提示: 直接编辑这些 YAML 文件即可自定义命令，重启后生效"
         )
     else:
         existing = sorted([f.name for f in custom_dir.glob("*.yaml")])
         return (
             f"[PASS] 项目命令目录已存在:\n"
-            f"  路径: {custom_dir}\n"
+            f"  工作目录: {cwd}\n"
+            f"  命令目录: {custom_dir}\n"
             f"  现有文件 ({len(existing)}个): {', '.join(existing)}"
         )
 
@@ -540,7 +549,19 @@ register_commands_from_yaml(mcp, _sessions, _command_history)
 
 
 def main():
-    mcp.run(transport="stdio")
+    """MCP Server entry point.
+
+    Runs the MCP server with stdio transport for Claude Desktop/Code integration.
+    The server will keep running until the client disconnects.
+    """
+    import asyncio
+    try:
+        mcp.run(transport="stdio")
+    except KeyboardInterrupt:
+        logger.info("[Instrument MCP] Shutting down...")
+    except Exception as e:
+        logger.error(f"[Instrument MCP] Error: {e}")
+        raise
 
 
 if __name__ == "__main__":
