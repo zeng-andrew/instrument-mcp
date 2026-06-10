@@ -1,18 +1,58 @@
 [project]
 name = "instrument-mcp"
 version = "0.1.0"
-description = "MCP Server for MXA/CMW/PPK2 instrument control"
+description = "MCP Server for instrument control (MXA/CMW500/Keysight PSU)"
+readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.10"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"},
+]
+maintainers = [
+    {name = "Your Name", email = "your.email@example.com"},
+]
+keywords = ["mcp", "instrument", "scpi", "visa", "mxa", "cmw500", "test-equipment"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
-    "mcp",
-    "pyvisa",
-    "pyserial",
-    "pyyaml",
+    "mcp>=1.0.0",
+    "pyvisa>=1.13.0",
+    "pyserial>=3.5",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.1.0",
 ]
 
 [project.scripts]
 instrument-mcp = "instrument_mcp.server:main"
 
+[project.urls]
+Homepage = "https://github.com/yourusername/instrument-mcp"
+Repository = "https://github.com/yourusername/instrument-mcp"
+Issues = "https://github.com/yourusername/instrument-mcp/issues"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/instrument_mcp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

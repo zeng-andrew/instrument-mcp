@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "instrument-mcp": {
+      "command": "D:/MCPTools/instrument-mcp/.venv/Scripts/python.exe",
+      "args": ["-m", "instrument_mcp.server"],
+      "env": {}
+    }
+  }
+}

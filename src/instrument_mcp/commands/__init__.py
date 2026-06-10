@@ -186,15 +186,46 @@ def register_commands_from_yaml(
         mcp: FastMCP 实例
         sessions: 仪器会话字典（server 维护）
         command_history: 命令执行历史列表
-        yaml_path: YAML 文件路径，None 则加载内置 commands/*.yaml
+        yaml_path: YAML 文件路径，None 则加载内置 commands/*.yaml 和用户自定义命令
     """
+    configs = []
+
     if yaml_path:
-        configs = [_load_yaml(yaml_path)]
+        # 加载指定文件
+        configs.append(_load_yaml(yaml_path))
     else:
-        configs = []
+        # 加载内置命令
         pkg_path = Path(__file__).parent
         for f in sorted(pkg_path.glob("*.yaml")):
             configs.append(_load_yaml(f))
+
+        # 加载项目级自定义命令（从当前工作目录的 .instrument_mcp/）
+        import os
+        cwd = Path(os.getcwd())
+        project_custom_dir = cwd / ".instrument_mcp"
+        if project_custom_dir.exists():
+            logger.info(f"Loading project custom commands from: {project_custom_dir}")
+            for f in sorted(project_custom_dir.glob("*.yaml")):
+                try:
+                    configs.append(_load_yaml(f))
+                    logger.info(f"Loaded project custom command: {f.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to load {f}: {e}")
+
+        # 加载用户级自定义命令（从环境变量）
+        custom_dir = os.environ.get("INSTRUMENT_MCP_COMMANDS")
+        if custom_dir:
+            custom_path = Path(custom_dir)
+            if custom_path.exists():
+                logger.info(f"Loading user custom commands from: {custom_path}")
+                for f in sorted(custom_path.glob("*.yaml")):
+                    try:
+                        configs.append(_load_yaml(f))
+                        logger.info(f"Loaded user custom command: {f.name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to load {f}: {e}")
+            else:
+                logger.warning(f"Custom commands directory not found: {custom_path}")
 
     for config in configs:
         inst_type = config.get("instrument_type", "unknown")
