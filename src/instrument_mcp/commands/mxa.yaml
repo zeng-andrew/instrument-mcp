@@ -10,6 +10,9 @@ model_keywords:
   - "EXA"
 
 commands:
+  # ─────────────────────────────────────────────
+  # 基础控制命令
+  # ─────────────────────────────────────────────
   - name: idn
     description: 读取仪器标识信息（制造商、型号、序列号、固件版本）
     annotations:
@@ -26,6 +29,32 @@ commands:
     params: []
     scpi_template: "*RST"
 
+  - name: mxa_opc
+    description: 等待操作完成
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "*OPC?"
+
+  - name: mxa_cls
+    description: 清除仪器状态（*CLS）
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "*CLS"
+
+  - name: mxa_get_error
+    description: 读取仪器错误队列
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "SYST:ERR?"
+
+  # ─────────────────────────────────────────────
+  # 频率设置命令
+  # ─────────────────────────────────────────────
   - name: mxa_set_frequency
     description: 设置中心频率和频率扫宽
     annotations:
@@ -43,6 +72,34 @@ commands:
       - "FREQ:CENT {center_hz}"
       - "FREQ:SPAN {span_hz}"
 
+  - name: mxa_set_freq_start_stop
+    description: 设置起始和终止频率
+    annotations:
+      destructiveHint: false
+    params:
+      - name: start_hz
+        type: number
+        description: 起始频率（Hz）
+        default: 900000000
+      - name: stop_hz
+        type: number
+        description: 终止频率（Hz）
+        default: 1100000000
+    scpi_template:
+      - "FREQ:STAR {start_hz}"
+      - "FREQ:STOP {stop_hz}"
+
+  - name: mxa_query_frequency
+    description: 查询频率参数
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "FREQ:CENT?"
+
+  # ─────────────────────────────────────────────
+  # 带宽设置命令
+  # ─────────────────────────────────────────────
   - name: mxa_set_rbw
     description: 设置分辨率带宽（RBW）
     annotations:
@@ -53,7 +110,6 @@ commands:
         description: RBW 值，单位 Hz（-1 表示自动）
         default: -1
     scpi_template:
-      query: "BAND:RES?"
       write: "BAND:RES {rbw_hz}"
 
   - name: mxa_set_vbw
@@ -66,9 +122,11 @@ commands:
         description: VBW 值，单位 Hz（-1 表示自动）
         default: -1
     scpi_template:
-      query: "BAND:VID?"
       write: "BAND:VID {vbw_hz}"
 
+  # ─────────────────────────────────────────────
+  # 幅度设置命令
+  # ─────────────────────────────────────────────
   - name: mxa_set_ref_level
     description: 设置参考电平
     annotations:
@@ -91,31 +149,16 @@ commands:
         default: -1
     scpi_template: "POW:ATT {att_db}"
 
-  - name: mxa_peak_search
-    description: 执行峰值搜索并返回峰值频率和幅度
+  - name: mxa_optimize_range
+    description: 优化功率范围（自动调整衰减和参考电平）
     annotations:
-      readOnlyHint: true
+      destructiveHint: false
     params: []
-    scpi_template:
-      write: "CALC:MARK:MAX"
-      query: "CALC:MARK:Y?"
+    scpi_template: "POW:RANG:OPT IMM"
 
-  - name: mxa_read_marker
-    description: 读取当前标记点的幅度值（不移动标记）
-    annotations:
-      readOnlyHint: true
-    params: []
-    scpi_template:
-      query: "CALC:MARK:Y?"
-
-  - name: mxa_read_trace
-    description: 读取当前迹线的数据点
-    annotations:
-      readOnlyHint: true
-    params: []
-    scpi_template:
-      query: "TRAC:DATA? TRACE1"
-
+  # ─────────────────────────────────────────────
+  # 扫描控制命令
+  # ─────────────────────────────────────────────
   - name: mxa_sweep_single
     description: 执行单次扫描并等待完成
     annotations:
@@ -123,7 +166,6 @@ commands:
     params: []
     scpi_template:
       write: "INIT:CONT OFF"
-      query: "*OPC?"
 
   - name: mxa_sweep_continuous
     description: 设置为连续扫描模式
@@ -131,6 +173,119 @@ commands:
       destructiveHint: false
     params: []
     scpi_template: "INIT:CONT ON"
+
+  - name: mxa_sweep_imm
+    description: 立即触发单次扫描
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "INIT:IMM"
+
+  - name: mxa_set_sweep_points
+    description: 设置扫描点数
+    annotations:
+      destructiveHint: false
+    params:
+      - name: points
+        type: integer
+        description: 扫描点数
+        default: 1001
+    scpi_template: "SWE:POIN {points}"
+
+  - name: mxa_query_sweep_time
+    description: 查询扫描时间
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "SWE:TIME?"
+
+  # ─────────────────────────────────────────────
+  # 标记操作命令
+  # ─────────────────────────────────────────────
+  - name: mxa_peak_search
+    description: 执行峰值搜索并返回峰值幅度
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      write: "CALC:MARK:MAX"
+
+  - name: mxa_peak_next
+    description: 搜索下一个峰值
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      write: "CALC:MARK:MAX:NEXT"
+
+  - name: mxa_peak_left
+    description: 搜索左侧峰值
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      write: "CALC:MARK:MAX:LEFT"
+
+  - name: mxa_peak_right
+    description: 搜索右侧峰值
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      write: "CALC:MARK:MAX:RIGH"
+
+  - name: mxa_read_marker_y
+    description: 读取当前标记点的幅度值
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CALC:MARK:Y?"
+
+  - name: mxa_read_marker_x
+    description: 读取当前标记点的频率值
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CALC:MARK:X?"
+
+  - name: mxa_marker_off
+    description: 关闭所有标记点
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "CALC:MARK:AOFF"
+
+  - name: mxa_marker_table_on
+    description: 打开标记表显示
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "CALC:MARK:TABL ON"
+
+  # ─────────────────────────────────────────────
+  # 迹线操作命令
+  # ─────────────────────────────────────────────
+  - name: mxa_read_trace
+    description: 读取当前迹线的数据点（ASCII 格式）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "TRAC:DATA? TRACE1"
+
+  - name: mxa_set_trace_mode
+    description: 设置迹线模式
+    annotations:
+      destructiveHint: false
+    params:
+      - name: mode
+        type: string
+        description: 迹线模式（WRITe, MAXHold, MINHold, VIEW, BLANk）
+        default: "WRITE"
+    scpi_template: "TRAC:TYPE {mode}"
 
   - name: mxa_set_detector
     description: 设置检波器类型
@@ -154,28 +309,147 @@ commands:
         default: 1
     scpi_template: "AVER:COUN {count}"
 
-  - name: mxa_set_trace_mode
-    description: 设置迹线模式
+  - name: mxa_set_average_type
+    description: 设置平均类型
     annotations:
       destructiveHint: false
     params:
-      - name: mode
+      - name: type
         type: string
-        description: 迹线模式（WRITe, MAXHold, MINHold, VIEW, BLANk）
-        default: "WRITE"
-    scpi_template: "TRAC1:MODE {mode}"
+        description: 平均类型（RMS, LOG, SCALar）
+        default: "RMS"
+    scpi_template: "AVER:TYPE {type}"
 
-  - name: mxa_get_error
-    description: 读取仪器错误队列
+  # ─────────────────────────────────────────────
+  # 谐波测量命令（HARMonics）
+  # ─────────────────────────────────────────────
+  - name: mxa_select_sa
+    description: 选择频谱分析模式（Spectrum Analyzer）
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "INST:SEL SA"
+
+  - name: mxa_config_harmonics
+    description: 配置谐波测量模式
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "CONFigure:HARMonics"
+
+  - name: mxa_set_harm_bw
+    description: 设置谐波测量带宽
+    annotations:
+      destructiveHint: false
+    params:
+      - name: bw_khz
+        type: number
+        description: 带宽值（kHz）
+        default: 10
+    scpi_template: "HARM:BWID {bw_khz} kHz"
+
+  - name: mxa_set_harm_number
+    description: 设置谐波数量
+    annotations:
+      destructiveHint: false
+    params:
+      - name: number
+        type: integer
+        description: 谐波数量（1-10）
+        default: 7
+    scpi_template: "HARM:NUMB {number}"
+
+  - name: mxa_set_harm_trace_type
+    description: 设置谐波迹线类型
+    annotations:
+      destructiveHint: false
+    params:
+      - name: type
+        type: string
+        description: 迹线类型（WRIT, MAXHold）
+        default: "WRIT"
+    scpi_template: "HARM:TRAC:TYPE {type}"
+
+  - name: mxa_set_harm_average
+    description: 设置谐波平均
+    annotations:
+      destructiveHint: false
+    params:
+      - name: state
+        type: string
+        description: 平均开关（OFF, ON）
+        default: "OFF"
+    scpi_template: "HARM:AVER {state}"
+
+  - name: mxa_set_harm_average_count
+    description: 设置谐波平均次数
+    annotations:
+      destructiveHint: false
+    params:
+      - name: count
+        type: integer
+        description: 平均次数
+        default: 10
+    scpi_template: "HARM:AVER:COUN {count}"
+
+  - name: mxa_set_harm_sweep_auto
+    description: 设置谐波扫描时间自动
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "HARM:SWE:AUTO ON"
+
+  - name: mxa_set_harm_sweep_dwell
+    description: 设置谐波扫描驻留时间
+    annotations:
+      destructiveHint: false
+    params:
+      - name: dwell_us
+        type: integer
+        description: 驻留时间（微秒）
+        default: 100
+    scpi_template: "HARM:SWE {dwell_us} us"
+
+  - name: mxa_set_harm_trigger
+    description: 设置谐波触发源
+    annotations:
+      destructiveHint: false
+    params:
+      - name: source
+        type: string
+        description: 触发源（IMM, EXT, LINE）
+        default: "IMM"
+    scpi_template: "TRIG:HARM:SOUR {source}"
+
+  - name: mxa_fetch_harmonics
+    description: 读取谐波幅度值（返回 10 个值，H1 为 dBm，其余为 dBc）
     annotations:
       readOnlyHint: true
     params: []
     scpi_template:
-      query: "SYST:ERR?"
+      query: "FETCh:HARMonics:AMPLitude:ALL?"
 
-  - name: mxa_clear_status
-    description: 清除仪器状态（*CLS）
+  # ─────────────────────────────────────────────
+  # 状态保存/调用
+  # ─────────────────────────────────────────────
+  - name: mxa_save_state
+    description: 保存仪器状态到寄存器
     annotations:
       destructiveHint: false
-    params: []
-    scpi_template: "*CLS"
+    params:
+      - name: slot
+        type: integer
+        description: 寄存器槽位（1-10）
+        default: 1
+    scpi_template: "*SAV {slot}"
+
+  - name: mxa_recall_state
+    description: 从寄存器调用仪器状态
+    annotations:
+      destructiveHint: true
+    params:
+      - name: slot
+        type: integer
+        description: 寄存器槽位（1-10）
+        default: 1
+    scpi_template: "*RCL {slot}"
