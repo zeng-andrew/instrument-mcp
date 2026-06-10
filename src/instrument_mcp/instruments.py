@@ -64,6 +64,7 @@ class VisaInstrument:
 # 仪器注册表：新增仪器时在此注册
 INSTRUMENT_REGISTRY = {
     "mxa": (VisaInstrument, "Keysight MXA / EXA 系列频谱仪（通用 VISA 驱动）"),
+    "keysight_ps": (VisaInstrument, "Keysight 66311B 直流电源"),
     "generic": (VisaInstrument, "通用 SCPI 仪器"),
 }
 

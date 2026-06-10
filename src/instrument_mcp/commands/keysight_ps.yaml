@@ -1,0 +1,245 @@
+instrument_type: keysight_ps
+description: Keysight/Agilent 66311B 直流电源
+
+model_keywords:
+  - "66311B"
+  - "66311"
+  - "Keysight"
+  - "Agilent"
+  - "HEWLETT-PACKARD"
+
+commands:
+  # ─────────────────────────────────────────────
+  # 基础控制
+  # ─────────────────────────────────────────────
+  - name: idn
+    description: 读取仪器标识信息
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "*IDN?"
+
+  - name: ps_preset
+    description: 恢复电源预设状态
+    annotations:
+      destructiveHint: true
+    params: []
+    scpi_template: "*RST"
+
+  - name: ps_opc
+    description: 等待操作完成
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "*OPC?"
+
+  - name: ps_cls
+    description: 清除仪器状态
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "*CLS"
+
+  - name: ps_get_error
+    description: 读取错误队列
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "SYST:ERR?"
+
+  # ─────────────────────────────────────────────
+  # 电压控制
+  # ─────────────────────────────────────────────
+  - name: ps_set_voltage
+    description: 设置输出电压（V）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: voltage
+        type: number
+        description: 电压值（V）
+        default: 3.3
+    scpi_template:
+      write: "VOLT {voltage}"
+
+  - name: ps_get_voltage
+    description: 查询设定电压值
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "VOLT?"
+
+  - name: ps_meas_voltage
+    description: 测量实际输出电压
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "MEAS:VOLT?"
+
+  # ─────────────────────────────────────────────
+  # 电流控制
+  # ─────────────────────────────────────────────
+  - name: ps_set_current
+    description: 设置电流限制（A）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: current
+        type: number
+        description: 电流值（A）
+        default: 1.0
+    scpi_template:
+      write: "CURR {current}"
+
+  - name: ps_get_current
+    description: 查询设定电流限制
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CURR?"
+
+  - name: ps_meas_current
+    description: 测量实际输出电流
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "MEAS:CURR?"
+
+  # ─────────────────────────────────────────────
+  # 输出功率
+  # ─────────────────────────────────────────────
+  - name: ps_meas_power
+    description: 测量实际输出功率
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "MEAS:POW?"
+
+  # ─────────────────────────────────────────────
+  # 输出开关
+  # ─────────────────────────────────────────────
+  - name: ps_output_on
+    description: 开启输出
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template:
+      write: "OUTP ON"
+
+  - name: ps_output_off
+    description: 关闭输出
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template:
+      write: "OUTP OFF"
+
+  - name: ps_get_output_state
+    description: 查询输出状态
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "OUTP?"
+
+  # ─────────────────────────────────────────────
+  # 保护功能
+  # ─────────────────────────────────────────────
+  - name: ps_set_ovp
+    description: 设置过压保护（OVP）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: voltage
+        type: number
+        description: 过压保护值（V）
+        default: 4.0
+    scpi_template:
+      write: "VOLT:PROT {voltage}"
+
+  - name: ps_get_ovp
+    description: 查询过压保护值
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "VOLT:PROT?"
+
+  - name: ps_set_ocp
+    description: 设置过流保护（OCP）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: current
+        type: number
+        description: 过流保护值（A）
+        default: 1.5
+    scpi_template:
+      write: "CURR:PROT {current}"
+
+  - name: ps_get_ocp
+    description: 查询过流保护值
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CURR:PROT?"
+
+  - name: ps_clear_prot
+    description: 清除保护状态
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template:
+      write: "OUTP:PROT:CLE"
+
+  # ─────────────────────────────────────────────
+  # 高级功能
+  # ─────────────────────────────────────────────
+  - name: ps_set_sense
+    description: 设置远端/本地感测
+    annotations:
+      destructiveHint: false
+    params:
+      - name: mode
+        type: string
+        description: 感测模式（INTernal, EXTernal）
+        default: "INT"
+    scpi_template:
+      write: "VOLT:SENS {mode}"
+
+  - name: ps_get_sense
+    description: 查询感测模式
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "VOLT:SENS?"
+
+  - name: ps_set_range
+    description: 设置电压量程
+    annotations:
+      destructiveHint: false
+    params:
+      - name: range
+        type: string
+        description: 量程（LOW, HIGH, AUTO）
+        default: "AUTO"
+    scpi_template:
+      write: "VOLT:RANG {range}"
+
+  - name: ps_get_range
+    description: 查询电压量程
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "VOLT:RANG?"
