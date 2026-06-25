@@ -37,6 +37,13 @@ commands:
     scpi_template:
       query: "*OPC?"
 
+  - name: mxa_wai
+    description: 等待所有挂起操作完成后再执行后续命令（*WAI，用于谐波等多频段测量的时序同步）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template: "*WAI"
+
   - name: mxa_cls
     description: 清除仪器状态（*CLS）
     annotations:
@@ -428,6 +435,115 @@ commands:
     params: []
     scpi_template:
       query: "FETCh:HARMonics:AMPLitude:ALL?"
+
+  # ─────────────────────────────────────────────
+  # 谐波测量 - 方法一：一键式测量（MEASure，自动完成 配置->触发->返回）
+  # ─────────────────────────────────────────────
+  - name: mxa_meas_harm_amplitude
+    description: 一键式测量并返回所有谐波幅度（MEASure 自动完成 配置->触发->读取，H1 为 dBm，其余为 dBc）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "MEASure:HARMonics:AMPLitude:ALL?"
+
+  - name: mxa_meas_harm_distortion
+    description: 一键式测量并返回总谐波失真 THD（MEASure 自动完成 配置->触发->读取）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "MEASure:HARMonics:DISTortion?"
+
+  # ─────────────────────────────────────────────
+  # 谐波测量 - 方法二：读取式测量（READ，触发一次新测量并返回）
+  # ─────────────────────────────────────────────
+  - name: mxa_read_harm_amplitude
+    description: 触发一次新测量并返回所有谐波幅度（READ，需已切换到谐波模式）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "READ:HARMonics:AMPLitude:ALL?"
+
+  - name: mxa_read_harm_distortion
+    description: 触发一次新测量并返回总谐波失真 THD（READ，需已切换到谐波模式）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "READ:HARMonics:DISTortion?"
+
+  # ─────────────────────────────────────────────
+  # 谐波测量 - 方法三：三步曲控制（CONFigure->INITiate->FETCh，最灵活）
+  # CONFigure:HARMonics 见上方 mxa_config_harmonics
+  # ─────────────────────────────────────────────
+  - name: mxa_init_harmonics
+    description: 初始化/触发一次谐波测量（三步曲第二步，不返回数据，配合 FETCh 提取结果）
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "INITiate:HARMonics"
+
+  - name: mxa_fetch_harm_fundamental
+    description: 提取基波信息（基波频率/幅度，不触发新测量）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "FETCh:HARMonics:FUNDamental?"
+
+  - name: mxa_fetch_harm_distortion
+    description: 提取总谐波失真 THD（百分比或 dBc，不触发新测量）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "FETCh:HARMonics:DISTortion?"
+
+  - name: mxa_fetch_harm_amplitude_n
+    description: 提取特定次谐波的幅度（n=2 表示二次谐波，n=3 表示三次谐波，不触发新测量）
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: n
+        type: integer
+        description: 谐波次数（2 表示二次谐波，3 表示三次谐波，依此类推）
+        default: 2
+    scpi_template:
+      query: "FETCh:HARMonics:AMPLitude{n}?"
+
+  - name: mxa_fetch_harm_frequency
+    description: 提取所有谐波的频率列表（不触发新测量）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "FETCh:HARMonics:FREQuency:ALL?"
+
+  - name: mxa_fetch_harm_frequency_n
+    description: 提取特定次谐波的频率（n=2 表示二次谐波，可用于验证谐波是否出现在预期频点，不触发新测量）
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: n
+        type: integer
+        description: 谐波次数（2 表示二次谐波，3 表示三次谐波，依此类推）
+        default: 2
+    scpi_template:
+      query: "FETCh:HARMonics:FREQuency{n}?"
+
+  - name: mxa_fetch_harm_n
+    description: 提取特定次谐波的综合数据（n=2 表示二次谐波，不触发新测量）
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: n
+        type: integer
+        description: 谐波次数（2 表示二次谐波，3 表示三次谐波，依此类推）
+        default: 2
+    scpi_template:
+      query: "FETCh:HARMonics{n}?"
 
   # ─────────────────────────────────────────────
   # 状态保存/调用
