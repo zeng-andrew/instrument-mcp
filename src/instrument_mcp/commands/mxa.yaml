@@ -577,10 +577,14 @@ commands:
   # ─────────────────────────────────────────────
   # 峰值表谐波测量（Peak Table）
   # 一次宽频扫描 + 一次读取，避开列表扫描多次跳频的总线超时；命令已在 N9020A(MXA) A.17.05 实测验证。
-  # 门限/显露度/排序用 CALC:MARK:PEAK:* 设置；数据用带参数的 CALC:DATA:PEAK? 读取（裸查询报 -109 Missing parameter）。
+  # ★两套独立机制（实测确认）：
+  #   1) 屏幕峰值表显示：CALC:MARK:PEAK:*（TABL:STAT / SORT / THReshold[:STATe] / EXCursion[:STATe]），只影响屏幕。
+  #   2) 数据读取：CALC:DATA:PEAK? <门限>,<显露度>[,<排序>] —— 门限+显露度必填（缺则 -109 Missing parameter），
+  #      排序可选（省略时默认 AMPL 按幅度降序，且【不跟随】1) 里 CALC:MARK:PEAK:SORT 的屏幕状态）。
+  #   读出顺序只由查询自带的 sort 参数决定；与屏幕排序互不影响。人工对着屏幕核对时，屏幕(1)与查询(2)要设成相同的门限/显露度/排序。
   # 返回格式：<峰数>,<amp1>,<freq1>,<amp2>,<freq2>,...（首位为峰数，之后每对“幅度 dBm 在前、频率 Hz 在后”）
-  # 典型流程：select_sa -> set_freq_start_stop -> set_rbw -> set_sweep_time_auto -> peak_table_on
-  #          -> set_peak_sort(FREQ) -> set_peak_threshold/excursion -> sweep_single -> sweep_imm -> opc -> read_peak_table
+  # 最简读数：select_sa -> set_freq_start_stop [-> set_rbw] -> sweep_single -> sweep_imm -> opc -> read_peak_table(门限,显露度,排序)
+  # 给人看屏幕：另加 peak_table_on + set_peak_sort + set_peak_threshold/excursion（均设成与读数一致）
   # ─────────────────────────────────────────────
   - name: mxa_peak_table_on
     description: 打开峰值表显示（屏幕列出所有峰）
@@ -590,13 +594,13 @@ commands:
     scpi_template: "CALC:MARK:PEAK:TABL:STAT ON"
 
   - name: mxa_set_peak_sort
-    description: 设置峰值表排序方式（FREQ 按频率升序 / AMPL 按幅度降序）
+    description: 单独设置峰值表（屏幕显示）的排序方式。FREQ=按频率升序，AMPL=按幅度降序（实测）。仅影响屏幕峰值表；不改变 mxa_read_peak_table(CALC:DATA:PEAK?) 读出数据的顺序——那个由该查询自带的 sort 参数决定（省略默认 AMPL）。
     annotations:
       destructiveHint: false
     params:
       - name: sort
         type: string
-        description: 排序方式（FREQ 按频率，AMPL 按幅度）
+        description: 排序方式（FREQ 按频率升序，AMPL 按幅度降序）
         default: "FREQ"
     scpi_template: "CALC:MARK:PEAK:SORT {sort}"
 
@@ -611,6 +615,13 @@ commands:
         default: -70
     scpi_template: "CALC:MARK:PEAK:THReshold {threshold_dbm}"
 
+  - name: mxa_enable_peak_threshold
+    description: 启用峰值表幅度门限（CALC:MARK:PEAK:THReshold:STATe ON）。配合 mxa_set_peak_threshold 使用；不启用时屏幕峰值表会忽略门限、列出全部峰，导致与 mxa_read_peak_table 读数对不上
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "CALC:MARK:PEAK:THReshold:STATe ON"
+
   - name: mxa_set_peak_excursion
     description: 设置峰值显露度（dB），峰需比周围高出该值才被记录，过滤毛刺
     annotations:
@@ -622,8 +633,15 @@ commands:
         default: 5
     scpi_template: "CALC:MARK:PEAK:EXCursion {excursion_db}"
 
+  - name: mxa_enable_peak_excursion
+    description: 启用峰值显露度过滤（CALC:MARK:PEAK:EXCursion:STATe ON）。配合 mxa_set_peak_excursion 使用；不启用时屏幕不按显露度过滤毛刺
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "CALC:MARK:PEAK:EXCursion:STATe ON"
+
   - name: mxa_read_peak_table
-    description: 读取峰值表数据（带参数查询；裸查询会报 -109）。返回 <峰数>,<amp1>,<freq1>,<amp2>,<freq2>,...（幅度 dBm 在前，频率 Hz 在后）
+    description: 读取峰值表数据（带参数查询）。门限+显露度必填（缺任一报 -109），sort 可选（省略默认 AMPL 按幅度降序，不跟随 mxa_set_peak_sort 的屏幕排序状态）。返回 <峰数>,<amp1>,<freq1>,<amp2>,<freq2>,...（幅度 dBm 在前，频率 Hz 在后）
     annotations:
       readOnlyHint: true
     params:
@@ -637,7 +655,7 @@ commands:
         default: 6
       - name: sort
         type: string
-        description: 排序方式（FREQ 按频率，AMPL 按幅度）
+        description: 排序方式（FREQ 按频率升序，AMPL 按幅度降序）
         default: "FREQ"
     scpi_template:
       query: "CALC:DATA:PEAK? {threshold_dbm},{excursion_db},{sort}"

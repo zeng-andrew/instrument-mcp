@@ -107,8 +107,39 @@ commands:
   # ─────────────────────────────────────────────
   # 配置命令
   # ─────────────────────────────────────────────
+  # 频段/信道切换机制：手机处于 Connection Established 状态下，直接修改 Band 或
+  # 下行信道号即可——仪器内部自动发起 Redirection（重定向），手机保持在同一 LTE
+  # 连接内跳到新频率，无需 Handover、无需断开重连。改下行信道后上行信道自动计算。
+  #   FDD: OB1~OB32, OB65~OB67, OB252, OB255    TDD: OB33~OB46    自定义: UDEFined（需选件 KS525）
+  #   注意: OB252/OB255 需固件 V3.5.40+; OB29/OB32/OB67/OB252/OB255 仅用于辅载波(SCC)下行
+  # 双工模式约束（已在 CMW500 固件 3.5.120 实测）：频段属于哪种双工，就必须先把 DMODe 设成对应值，
+  #   否则切换会报 -221 Settings conflict。FDD 频段→DMODe FDD；TDD 频段(OB33~OB46)→DMODe TDD。
+  - name: cmw_set_duplex_mode
+    description: 设置 LTE 双工模式（FDD/TDD）。切到 TDD 频段(OB33~OB46)前必须先设为 TDD，否则设频段会报 -221 冲突
+    annotations:
+      destructiveHint: false
+    params:
+      - name: mode
+        type: string
+        description: 双工模式（FDD 或 TDD）
+        default: "FDD"
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:DMODe {mode}"
+
   - name: cmw_set_band
-    description: 设置 LTE 频段（如 OB1, OB3, OB7, OB38, OB40, OB41）
+    description: "设置 LTE 频段（FDD: OB1~OB32/OB65~OB67/OB252/OB255；TDD: OB33~OB46；自定义: UDEFined）"
+    annotations:
+      destructiveHint: false
+    params:
+      - name: band
+        type: string
+        description: 频段标识（如 OB1, OB3, OB7, OB38, OB40, OB41）
+        default: "OB1"
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:PCC:BAND {band}"
+
+  - name: cmw_switch_band
+    description: 一键切换频段+下行信道（同一双工模式内，谐波测试循环首选：设 Band 再设 DL 信道，仪器自动 Redirection 跳频，上行信道自动计算。跨 FDD/TDD 需先调用 cmw_set_duplex_mode）
     annotations:
       destructiveHint: false
     params:
@@ -116,8 +147,13 @@ commands:
         type: string
         description: 频段标识（如 OB1, OB3, OB7）
         default: "OB1"
+      - name: channel
+        type: integer
+        description: 下行信道号（EARFCN）
+        default: 300
     scpi_template:
-      write: "CONFigure:LTE:SIGN:PCC:BAND {band}"
+      - "CONFigure:LTE:SIGN:PCC:BAND {band}"
+      - "CONFigure:LTE:SIGN:RFSettings:PCC:CHANnel:DL {channel}"
 
   - name: cmw_set_dl_channel
     description: 设置下行信道号
@@ -182,6 +218,38 @@ commands:
   # ─────────────────────────────────────────────
   # 查询命令
   # ─────────────────────────────────────────────
+  - name: cmw_query_duplex_mode
+    description: 查询当前双工模式（FDD/TDD）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:DMODe?"
+
+  - name: cmw_query_band
+    description: 查询当前 LTE 频段
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:PCC:BAND?"
+
+  - name: cmw_query_dl_channel
+    description: 查询下行信道号（EARFCN）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:RFSettings:PCC:CHANnel:DL?"
+
+  - name: cmw_query_ul_channel
+    description: 查询上行信道号（改下行后自动计算，可用此命令确认）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:RFSettings:PCC:CHANnel:UL?"
+
   - name: cmw_query_dl_frequency
     description: 查询下行频率
     annotations:
@@ -224,6 +292,22 @@ commands:
     params: []
     scpi_template:
       query: "FETCh:LTE:SIGN:PSWitched:STATe?"
+
+  # ─────────────────────────────────────────────
+  # UE 能力查询（UE Capability）
+  # 数据来源：UE 在 Attach/注册时通过 RRC 上报的 UE Capability Report，仪器解析后缓存——不是实时去问 UE。
+  # 前提：必须先 cmw_cell_on → 等 UE 注册成功（cmw_query_connection_state 返回 CEST/已连接）后才有有效数据；
+  #       未连接时查询会超时/报错，或返回上一台 UE 的旧缓存（不可靠）。典型用途：先读 UE 支持哪些频段，
+  #       再用 cmw_switch_band 只遍历支持的频段做谐波测试。
+  # 注意：此命令头依据 R&S 文档补充；补充时仪器临时离线，尚未真机验证（band/duplex 命令均已 3.5.120 实测）。
+  # ─────────────────────────────────────────────
+  - name: cmw_query_ue_supported_bands
+    description: 查询 UE 上报的支持频段（读取 Attach 时收到的 UE Capability Report 缓存）。必须先让 UE 注册成功再查，否则报错或返回上一台 UE 的旧数据
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "SENSe:LTE:SIGN:UECapability:RF:SUPPorted?"
 
   # ─────────────────────────────────────────────
   # 测量命令
