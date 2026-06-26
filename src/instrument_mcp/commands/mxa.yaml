@@ -163,6 +163,17 @@ commands:
     params: []
     scpi_template: "POW:RANG:OPT IMM"
 
+  - name: mxa_set_correction_offset
+    description: 设置幅度修正偏移（补偿电缆线损/增益，正值补偿损耗）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: offset_db
+        type: number
+        description: 修正偏移值（dB），如 10 表示补偿 10dB 线损
+        default: 0
+    scpi_template: "SENS:CORR:OFFS {offset_db}"
+
   # ─────────────────────────────────────────────
   # 扫描控制命令
   # ─────────────────────────────────────────────
@@ -206,6 +217,24 @@ commands:
     params: []
     scpi_template:
       query: "SWE:TIME?"
+
+  - name: mxa_set_sweep_time_auto
+    description: 设置扫描时间自动/手动
+    annotations:
+      destructiveHint: false
+    params:
+      - name: state
+        type: string
+        description: 自动开关（ON, OFF）
+        default: "ON"
+    scpi_template: "SWE:TIME:AUTO {state}"
+
+  - name: mxa_sweep_restart
+    description: 重新开始一次测量/扫描（INIT:REST，重启单次扫描或平均累积）
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "INIT:REST"
 
   # ─────────────────────────────────────────────
   # 标记操作命令
@@ -544,6 +573,74 @@ commands:
         default: 2
     scpi_template:
       query: "FETCh:HARMonics{n}?"
+
+  # ─────────────────────────────────────────────
+  # 峰值表谐波测量（Peak Table）
+  # 一次宽频扫描 + 一次读取，避开列表扫描多次跳频的总线超时；命令已在 N9020A(MXA) A.17.05 实测验证。
+  # 门限/显露度/排序用 CALC:MARK:PEAK:* 设置；数据用带参数的 CALC:DATA:PEAK? 读取（裸查询报 -109 Missing parameter）。
+  # 返回格式：<峰数>,<amp1>,<freq1>,<amp2>,<freq2>,...（首位为峰数，之后每对“幅度 dBm 在前、频率 Hz 在后”）
+  # 典型流程：select_sa -> set_freq_start_stop -> set_rbw -> set_sweep_time_auto -> peak_table_on
+  #          -> set_peak_sort(FREQ) -> set_peak_threshold/excursion -> sweep_single -> sweep_imm -> opc -> read_peak_table
+  # ─────────────────────────────────────────────
+  - name: mxa_peak_table_on
+    description: 打开峰值表显示（屏幕列出所有峰）
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "CALC:MARK:PEAK:TABL:STAT ON"
+
+  - name: mxa_set_peak_sort
+    description: 设置峰值表排序方式（FREQ 按频率升序 / AMPL 按幅度降序）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: sort
+        type: string
+        description: 排序方式（FREQ 按频率，AMPL 按幅度）
+        default: "FREQ"
+    scpi_template: "CALC:MARK:PEAK:SORT {sort}"
+
+  - name: mxa_set_peak_threshold
+    description: 设置峰值表最低幅度门限（dBm），过滤底噪，仅记录高于该值的峰
+    annotations:
+      destructiveHint: false
+    params:
+      - name: threshold_dbm
+        type: number
+        description: 幅度门限（dBm），如 -70 表示仅记录大于 -70dBm 的峰值
+        default: -70
+    scpi_template: "CALC:MARK:PEAK:THReshold {threshold_dbm}"
+
+  - name: mxa_set_peak_excursion
+    description: 设置峰值显露度（dB），峰需比周围高出该值才被记录，过滤毛刺
+    annotations:
+      destructiveHint: false
+    params:
+      - name: excursion_db
+        type: number
+        description: 显露度（dB），如 5 表示峰必须比周围高 5dB
+        default: 5
+    scpi_template: "CALC:MARK:PEAK:EXCursion {excursion_db}"
+
+  - name: mxa_read_peak_table
+    description: 读取峰值表数据（带参数查询；裸查询会报 -109）。返回 <峰数>,<amp1>,<freq1>,<amp2>,<freq2>,...（幅度 dBm 在前，频率 Hz 在后）
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: threshold_dbm
+        type: number
+        description: 幅度门限（dBm），仅返回高于该值的峰
+        default: -70
+      - name: excursion_db
+        type: number
+        description: 峰值显露度（dB）
+        default: 6
+      - name: sort
+        type: string
+        description: 排序方式（FREQ 按频率，AMPL 按幅度）
+        default: "FREQ"
+    scpi_template:
+      query: "CALC:DATA:PEAK? {threshold_dbm},{excursion_db},{sort}"
 
   # ─────────────────────────────────────────────
   # 状态保存/调用
