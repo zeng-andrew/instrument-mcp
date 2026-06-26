@@ -1,0 +1,7 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude Code session runtime lock (keep the rest of .claude/)
+.claude/scheduled_tasks.lock

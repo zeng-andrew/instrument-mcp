@@ -579,12 +579,15 @@ commands:
   # 一次宽频扫描 + 一次读取，避开列表扫描多次跳频的总线超时；命令已在 N9020A(MXA) A.17.05 实测验证。
   # ★两套独立机制（实测确认）：
   #   1) 屏幕峰值表显示：CALC:MARK:PEAK:*（TABL:STAT / SORT / THReshold[:STATe] / EXCursion[:STATe]），只影响屏幕。
-  #   2) 数据读取：CALC:DATA:PEAK? <门限>,<显露度>[,<排序>] —— 门限+显露度必填（缺则 -109 Missing parameter），
+  #   2) 数据读取：CALC:DATA:PEAK? <门限>,<显露度>[,<排序>] —— 门限+显露度必填（缺则 -109 Missing parameter）。
+  #      ⚠勿手发裸 CALC:DATA:PEAK?：缺参时仪器不返回错误字符串、输出缓冲区为空，VISA 读取会一直等到 TMO 超时（曾被误判为命令无效/仪器无响应）。务必走 mxa_read_peak_table。
   #      排序可选（省略时默认 AMPL 按幅度降序，且【不跟随】1) 里 CALC:MARK:PEAK:SORT 的屏幕状态）。
   #   读出顺序只由查询自带的 sort 参数决定；与屏幕排序互不影响。人工对着屏幕核对时，屏幕(1)与查询(2)要设成相同的门限/显露度/排序。
   # 返回格式：<峰数>,<amp1>,<freq1>,<amp2>,<freq2>,...（首位为峰数，之后每对“幅度 dBm 在前、频率 Hz 在后”）
   # 最简读数：select_sa -> set_freq_start_stop [-> set_rbw] -> sweep_single -> sweep_imm -> opc -> read_peak_table(门限,显露度,排序)
   # 给人看屏幕：另加 peak_table_on + set_peak_sort + set_peak_threshold/excursion（均设成与读数一致）
+  # ★宽扫底噪受限（N9020A A.17.05 实测）：3-12GHz 一次宽扫，峰表底噪约 -62 dBm；幅度落在该量级的“峰”多为噪声尖峰、不可信，比底噪弱的真谐波会被淹没。
+  #   要可信谐波：把门限抬到底噪之上，或对各谐波频点 zoom（缩 span/降 RBW 压底噪）后单独读，或改用 mxa_config_harmonics 谐波测量模式。
   # ─────────────────────────────────────────────
   - name: mxa_peak_table_on
     description: 打开峰值表显示（屏幕列出所有峰）
@@ -641,7 +644,7 @@ commands:
     scpi_template: "CALC:MARK:PEAK:EXCursion:STATe ON"
 
   - name: mxa_read_peak_table
-    description: 读取峰值表数据（带参数查询）。门限+显露度必填（缺任一报 -109），sort 可选（省略默认 AMPL 按幅度降序，不跟随 mxa_set_peak_sort 的屏幕排序状态）。返回 <峰数>,<amp1>,<freq1>,<amp2>,<freq2>,...（幅度 dBm 在前，频率 Hz 在后）
+    description: 读取峰值表数据（带参数查询）。门限+显露度必填（缺任一报 -109；注意缺参表现为 VISA 读取超时 TMO 而非报错，勿手发裸 CALC:DATA:PEAK?）。sort 可选（省略默认 AMPL 按幅度降序，不跟随 mxa_set_peak_sort 的屏幕排序状态）。返回 <峰数>,<amp1>,<freq1>,<amp2>,<freq2>,...（幅度 dBm 在前，频率 Hz 在后）。宽扫底噪受限(~-62dBm)，底噪量级的峰不可信、弱谐波需 zoom 或抬高门限
     annotations:
       readOnlyHint: true
     params:
