@@ -1,0 +1,138 @@
+instrument_type: temperature_chamber
+description: 环境试验箱 / 温箱（TEMI880 / PC-Link 协议）。支持温度读取、设定和循环控制。
+
+# 型号识别：通过 PC-Link 协议探测
+# TEMI880 仪表通常安装在 Espec / Thermotron / CSZ 等品牌温箱中
+model_keywords:
+  - "ESPEC"
+  - "THERMOTRON"
+  - "CSZ"
+  - "WEISS"
+  - "ETAC"
+  - "CHAMBER"
+  - "TEMPERATURE"
+  - "ENVIRONMENTAL"
+  - "SH-"
+  - "SU-"
+  - "SE-"
+  - "Z-PLUS"
+
+commands:
+  # ═══════════════════════════════════════════════
+  # PC-Link 协议核心命令（TEMI880 温控仪表）
+  # ═══════════════════════════════════════════════
+
+  # --- 读取命令 ---
+  - name: tc_read_pv
+    description: "读取温箱当前温度 PV（PC-Link RMD 命令）"
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: station
+        type: string
+        description: 仪表站号，如 01
+        default: "01"
+      - name: register
+        type: string
+        description: 寄存器地址，温度PV通常为0100
+        default: "0100"
+    handler: "instrument_mcp.commands.temi880_handler.handler_read_pv"
+
+  - name: tc_read_sv
+    description: "读取温箱设定温度 SV（PC-Link RSD 命令）"
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: station
+        type: string
+        description: 仪表站号，如 01
+        default: "01"
+      - name: register
+        type: string
+        description: 寄存器地址，温度SV通常为0001
+        default: "0001"
+    handler: "instrument_mcp.commands.temi880_handler.handler_read_sv"
+
+  - name: tc_read_status
+    description: "同时读取 PV 和 SV，返回 JSON"
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: station
+        type: string
+        description: 仪表站号
+        default: "01"
+    handler: "instrument_mcp.commands.temi880_handler.handler_read_status"
+
+  # --- 写入命令 ---
+  - name: tc_set_sv
+    description: "设置温箱目标温度 SV（PC-Link WSD 命令）。温度循环通过修改 SV 实现"
+    annotations:
+      destructiveHint: true
+    params:
+      - name: temp_c
+        type: number
+        description: 目标温度（°C），如 85.0、-40.0
+        default: 25.0
+      - name: station
+        type: string
+        description: 仪表站号
+        default: "01"
+      - name: register
+        type: string
+        description: 寄存器地址，温度SV通常为0001
+        default: "0001"
+    handler: "instrument_mcp.commands.temi880_handler.handler_set_sv"
+
+  # --- 探测命令 ---
+  - name: tc_probe
+    description: "探测 TEMI880 通信：发送 RMD 0100 并返回原始响应。用于首次连接验证"
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: station
+        type: string
+        description: 仪表站号
+        default: "01"
+    handler: "instrument_mcp.commands.temi880_handler.handler_probe"
+
+  # ═══════════════════════════════════════════════
+  # 通用 SCPI 命令（备用，适用于非 TEMI880 温箱）
+  # ═══════════════════════════════════════════════
+  - name: tc_idn
+    description: 读取温箱标识信息
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "*IDN?"
+
+  - name: tc_reset
+    description: 复位温箱（*RST）
+    annotations:
+      destructiveHint: true
+    params: []
+    scpi_template: "*RST"
+
+  - name: tc_get_error
+    description: 读取错误队列
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "SYST:ERR?"
+
+  - name: tc_cls
+    description: 清除状态寄存器
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template: "*CLS"
+
+  - name: tc_opc
+    description: 等待操作完成
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "*OPC?"

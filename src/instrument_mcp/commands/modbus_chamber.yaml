@@ -1,0 +1,109 @@
+instrument_type: modbus_chamber
+description: Modbus-RTU 恒温恒湿试验箱（MODBUS-1 协议, RS-232C, 9600 8N1, CRC, 地址 1）
+
+# 连接方式（Modbus 仪器无 *IDN?，必须显式指定类型）:
+#   connect(address="COM30", instrument_type="modbus_chamber", alias="chamber")
+#
+# 寄存器映射（实物验证）:
+#   0x0001  温度 PV（只读, ×100, 有符号）
+#   0x0005  湿度 PV（只读, ×10）
+#   0x0007  输出量 MV（只读, ×10）
+#   0x000A  运行标志（只读, 1=运行）
+#   0x0065  运行控制（写 1=定值运行, 写 4=停止）
+#   0x0066  温度 SV（读写, ×100, 有符号）
+#   0x0067  湿度 SV（读写, ×10）
+#   0x0002  工作温度设定（只读, 勿写）
+
+model_keywords: []
+
+commands:
+  - name: mc_read_pv
+    description: "读取温箱当前温度 PV（°C）"
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: reg_addr
+        type: integer
+        description: PV 寄存器地址（十进制），默认 1 (0x0001)
+        default: 1
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_read_pv"
+
+  - name: mc_read_sv
+    description: "读取温箱设定温度 SV（°C）"
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: reg_addr
+        type: integer
+        description: SV 寄存器地址（十进制），默认 102 (0x0066)
+        default: 102
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_read_sv"
+
+  - name: mc_set_sv
+    description: "设置温箱目标温度 SV（°C），写后读回验证。温度循环通过修改 SV 实现"
+    annotations:
+      destructiveHint: true
+    params:
+      - name: temp_c
+        type: number
+        description: 目标温度（°C），如 85.0、-40.0
+        default: 25.0
+      - name: reg_addr
+        type: integer
+        description: SV 寄存器地址（十进制），默认 102 (0x0066)
+        default: 102
+      - name: verify
+        type: boolean
+        description: 写后是否读回验证
+        default: true
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_set_sv"
+
+  - name: mc_read_status
+    description: "读取温箱完整状态：温度 PV/SV、湿度 PV/SV、输出量、运行标志，返回 JSON"
+    annotations:
+      readOnlyHint: true
+    params: []
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_read_status"
+
+  - name: mc_read_humidity
+    description: "读取当前湿度 PV（%RH）"
+    annotations:
+      readOnlyHint: true
+    params: []
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_read_humidity"
+
+  - name: mc_read_humidity_sv
+    description: "读取设定湿度 SV（%RH）"
+    annotations:
+      readOnlyHint: true
+    params: []
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_read_humidity_sv"
+
+  - name: mc_set_humidity_sv
+    description: "设置目标湿度 SV（%RH），写后读回验证"
+    annotations:
+      destructiveHint: true
+    params:
+      - name: humidity_rh
+        type: number
+        description: 目标湿度（%RH），如 25.0、95.0
+        default: 50.0
+      - name: verify
+        type: boolean
+        description: 写后是否读回验证
+        default: true
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_set_humidity_sv"
+
+  - name: mc_run
+    description: "启动温箱定值运行（写运行控制寄存器），温箱开始向 SV 升/降温"
+    annotations:
+      destructiveHint: true
+    params: []
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_run"
+
+  - name: mc_stop
+    description: "停止温箱运行"
+    annotations:
+      destructiveHint: true
+    params: []
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_stop"

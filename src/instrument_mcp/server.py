@@ -76,8 +76,15 @@ def connect(address: str, instrument_type: str = "auto", alias: str = "default")
     """
     from instrument_mcp.instruments import VisaInstrument, INSTRUMENT_REGISTRY
 
+    # 指定了仪器类型时使用注册表中的驱动类（如 modbus_chamber 用串口驱动）；
+    # auto 时默认 VISA。
+    if instrument_type != "auto" and instrument_type in INSTRUMENT_REGISTRY:
+        inst_cls = INSTRUMENT_REGISTRY[instrument_type][0]
+    else:
+        inst_cls = VisaInstrument
+
     try:
-        inst = VisaInstrument(address=address)
+        inst = inst_cls(address=address)
         inst.open()
     except Exception as e:
         return f"[FAIL] 连接失败: {e}"
