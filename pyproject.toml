@@ -1,7 +1,7 @@
 [project]
 name = "instrument-mcp"
 version = "0.1.0"
-description = "MCP Server for instrument control (MXA/CMW500/Keysight PSU)"
+description = "MCP Server for instrument control (MXA/CMW500/Keysight PSU/DSLogic)"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -11,7 +11,7 @@ authors = [
 maintainers = [
     {name = "Your Name", email = "your.email@example.com"},
 ]
-keywords = ["mcp", "instrument", "scpi", "visa", "mxa", "cmw500", "test-equipment"]
+keywords = ["mcp", "instrument", "scpi", "visa", "mxa", "cmw500", "dslogic", "logic-analyzer", "test-equipment"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -29,6 +29,7 @@ dependencies = [
     "pyserial>=3.5",
     "pyyaml>=6.0",
     "pydantic>=2.0",
+    "pyusb>=1.2.0",
 ]
 
 [project.optional-dependencies]
@@ -52,6 +53,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/instrument_mcp"]
+artifacts = ["src/instrument_mcp/libusb-1.0.dll"]
 
 [tool.ruff]
 line-length = 100

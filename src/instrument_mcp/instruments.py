@@ -172,12 +172,66 @@ class SerialModbusInstrument:
             raise RuntimeError(f"写寄存器无有效回显: {raw.hex(' ').upper() or '(empty)'}")
 
 
+class DSLogicInstrument:
+    """DreamSourceLab DSLogic U3Pro16 USB 逻辑分析仪。
+
+    与 VisaInstrument 保持 open/close/write/query 接口兼容，
+    使 server.connect() 可以统一处理。
+    """
+
+    def __init__(self, address: str = "USB", timeout_ms: int = 10000):
+        self.address = address
+        self.timeout_ms = timeout_ms
+        self._usb: Optional[object] = None
+
+    def open(self) -> None:
+        from instrument_mcp.dslogic_usb import DSLogicU3Pro16USB
+
+        self._usb = DSLogicU3Pro16USB()
+        self._usb.open()
+        logger.info(f"DSLogic connected: {self._usb.dev}")
+
+    def close(self) -> None:
+        if self._usb:
+            try:
+                self._usb.close()
+            except Exception as e:
+                logger.warning(f"Error closing DSLogic: {e}")
+            self._usb = None
+        logger.info("DSLogic disconnected")
+
+    def write(self, command: str) -> None:
+        raise RuntimeError("DSLogic 不支持文本 write，请使用专用命令")
+
+    def query(self, command: str) -> str:
+        """模拟 SCPI *IDN?，用于 connect() 中的型号识别。"""
+        if command.strip() == "*IDN?":
+            if self._usb is None:
+                raise RuntimeError("DSLogic not connected")
+            return self._usb.get_idn()
+        raise RuntimeError(f"DSLogic 不支持查询: {command}")
+
+    def __getattr__(self, name: str):
+        """透传所有未实现方法到底层 USB 控制器。"""
+        if self._usb is None:
+            raise RuntimeError("DSLogic not connected")
+        return getattr(self._usb, name)
+
+    def __enter__(self):
+        self.open()
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
 # 仪器注册表：新增仪器时在此注册
 INSTRUMENT_REGISTRY = {
     "mxa": (VisaInstrument, "Keysight MXA / EXA 系列频谱仪（通用 VISA 驱动）"),
     "keysight_ps": (VisaInstrument, "Keysight 66311B 直流电源"),
     "temperature_chamber": (VisaInstrument, "环境试验箱 / 温箱（Espec / Thermotron / CSZ 等）"),
     "modbus_chamber": (SerialModbusInstrument, "Modbus-RTU 恒温恒湿试验箱（MODBUS-1 协议, RS-232C）"),
+    "dslogic": (DSLogicInstrument, "DreamSourceLab DSLogic U3Pro16 USB 逻辑分析仪"),
     "generic": (VisaInstrument, "通用 SCPI 仪器"),
 }
 

@@ -13,7 +13,13 @@ Instrument MCP Server - 仪器控制 MCP 服务器
 - Keysight MXA/EXA 频谱仪 (mxa)
 - R&S CMW500 无线通信测试仪 (cmw)
 - Keysight 66311B 直流电源 (keysight_ps)
+- DreamSourceLab DSLogic U3Pro16 USB 逻辑分析仪 (dslogic)
 - 通用 SCPI 仪器 (generic)
+
+DSLogic 连接示例:
+- connect(address="USB", instrument_type="dslogic", alias="la")
+- dslogic_get_status(alias="la")
+- dslogic_monitor_level(alias="la", samplerate_mhz=10, duration=5)
 
 项目级命令扩展:
 - 运行 init_project_commands() 会在当前目录创建 .instrument_mcp/
@@ -561,7 +567,6 @@ def main():
     Runs the MCP server with stdio transport for Claude Desktop/Code integration.
     The server will keep running until the client disconnects.
     """
-    import asyncio
     try:
         mcp.run(transport="stdio")
     except KeyboardInterrupt:

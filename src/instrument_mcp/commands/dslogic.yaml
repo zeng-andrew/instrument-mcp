@@ -1,0 +1,98 @@
+instrument_type: dslogic
+description: DreamSourceLab DSLogic U3Pro16 USB 逻辑分析仪
+model_keywords:
+  - "DSLogic U3Pro16"
+  - "DreamSourceLab"
+commands:
+  - name: dslogic_get_status
+    description: 读取 DSLogic U3Pro16 硬件状态（FPGA_DONE、GPIF_DONE 等），仅适用于此型号
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.dslogic_handler:dslogic_get_status
+
+  - name: dslogic_set_threshold
+    description: 设置 DSLogic U3Pro16 逻辑阈值电压（默认 1.65 V，适合 3.3 V 逻辑），仅适用于此型号
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: vth
+        type: number
+        description: 阈值电压（V）
+        default: 1.65
+    handler: instrument_mcp.commands.dslogic_handler:dslogic_set_threshold
+
+  - name: dslogic_load_fpga
+    description: 为 DSLogic U3Pro16 加载 FPGA 位流（通常不需要，设备已自带），仅适用于此型号
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: bitstream_path
+        type: string
+        description: FPGA 位流文件路径
+        default: "D:\\DSView\\res\\DSLogicU3Pro16.bin"
+    handler: instrument_mcp.commands.dslogic_handler:dslogic_load_fpga
+
+  - name: dslogic_capture
+    description: DSLogic U3Pro16 单次缓冲采集并保存到文件，仅适用于此型号
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: samplerate_mhz
+        type: number
+        description: 采样率（MHz）
+        default: 100.0
+      - name: samples
+        type: integer
+        description: 采样点数
+        default: 1024
+      - name: ch_en
+        type: integer
+        description: 通道使能位图（16 位，默认 0xFFFF 全开）
+        default: 65535
+      - name: output_path
+        type: string
+        description: 输出文件路径
+        default: "capture.bin"
+    handler: instrument_mcp.commands.dslogic_handler:dslogic_capture
+
+  - name: dslogic_monitor_level
+    description: DSLogic U3Pro16 持续监测电平边沿（流模式），支持上升沿/下降沿/双向检测与去抖，仅适用于此型号
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: samplerate_mhz
+        type: number
+        description: 采样率（MHz），建议 1~10，太高会导致 Python 处理跟不上
+        default: 1.0
+      - name: duration
+        type: number
+        description: 监测时长（秒）
+        default: 30.0
+      - name: channel
+        type: integer
+        description: 要监测的通道索引（0=CH0，1=CH1，...），-1 表示全部 16 通道
+        default: -1
+      - name: edge_type
+        type: string
+        description: 边沿类型：rising（0->1）、falling（1->0）、both（双向）
+        default: "both"
+      - name: debounce_us
+        type: number
+        description: 去抖时间（微秒），持续时间短于此值的脉冲会被忽略
+        default: 0.0
+      - name: stop_on_first_edge
+        type: boolean
+        description: 检测到第一条匹配边沿后立即停止
+        default: false
+    handler: instrument_mcp.commands.dslogic_handler:dslogic_monitor_level
