@@ -243,3 +243,50 @@ commands:
     params: []
     scpi_template:
       query: "VOLT:RANG?"
+
+  # ─────────────────────────────────────────────
+  # 高速数字化采集（66311B/66332A 高速电流数字化仪）
+  # 硬件: 固定 4096 点缓冲，最小间隔 15.6 us(~64 kS/s)，单次有限采集，不支持连续流式。
+  # 多批拼接覆盖长时长；单批内均匀，批次间存在不可消除的取回阴影（已记录）。
+  # 详见 keysight_ps_handler.py 顶部说明。
+  # ─────────────────────────────────────────────
+  - name: ps_acquire_current
+    description: >
+      高速采集电流(或电压)并写 CSV。用满 4096 点缓冲，多批拼接覆盖指定总时长。
+      单批内采样绝对均匀(间隔=1/采样率)；批次间存在取回阴影(已记录到 CSV 的 shadow_flag 列)。
+      降低采样率可增大单批覆盖时长、减少批次数、压低阴影占比。
+      硬件上限 ~64103 Hz(15.6us)；建议 100~5000 Hz。大数据写文件，返回 JSON 摘要。
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: output_path
+        type: string
+        description: "CSV 输出路径（列: batch_index,t_offset_s,value,shadow_flag）"
+        default: "power_supply_acquire.csv"
+      - name: sample_rate_hz
+        type: number
+        description: 采样率(Hz)。越低单批越长、阴影占比越小。上限 ~64103。
+        default: 1000.0
+      - name: duration_s
+        type: number
+        description: 总采集时长(秒)
+        default: 10.0
+      - name: function
+        type: string
+        description: 采集量 CURR(电流) 或 VOLT(电压)
+        default: "CURR"
+    handler: "instrument_mcp.commands.keysight_ps_handler.ps_acquire_current"
+
+  - name: ps_acquire_abort
+    description: 中止正在进行的扫描采集（ABOR）。采集卡住时用于重置。
+    annotations:
+      destructiveHint: false
+    params: []
+    handler: "instrument_mcp.commands.keysight_ps_handler.ps_acquire_abort"
+
+  - name: ps_get_acquire_config
+    description: 查询当前高速扫描采集配置（测量函数/点数/间隔/硬件上限），返回 JSON。
+    annotations:
+      readOnlyHint: true
+    params: []
+    handler: "instrument_mcp.commands.keysight_ps_handler.ps_get_acquire_config"
