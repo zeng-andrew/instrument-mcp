@@ -5,3 +5,9 @@ __pycache__/
 
 # Claude Code session runtime lock (keep the rest of .claude/)
 .claude/scheduled_tasks.lock
+
+# ZCode agent working directory
+.zcode/
+
+# Experimental CH340 error31 fix notes (fix is baked into instruments.py)
+docs/CH340_error31_fix.md
