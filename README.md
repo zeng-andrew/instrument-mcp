@@ -39,6 +39,30 @@ Before installing, ensure you have:
 | Generic SCPI instruments | Any | VISA |
 | Modbus-RTU 恒温恒湿试验箱 | Chamber | Serial (RS-232C) |
 
+## Keysight 66300 系列直流电源
+
+支持 66311B/D、66321B/D、66319B/D 等 66300 家族移动通信直流电源（共用同一套 SCPI 命令）。
+
+### Connection
+
+```
+connect(address="GPIB0::5::INSTR", instrument_type="keysight_ps", alias="ps")
+```
+
+### 诊断命令
+
+| 命令 | 功能 |
+|------|------|
+| `ps_health_check` | 一键只读健康检查：自检 + 错误队列 + 状态寄存器解码 + 保护配置 + 测量有效性判定，返回 `verdict`（USABLE / WARNING / NEEDS_SERVICE） |
+| `ps_clear_protection` | 清除输出保护锁存（`*CLS` + `OUTP:PROT:CLE`），可选关闭 OVP，读回 QUES 确认是否清除成功 |
+
+`ps_health_check` 的 `verdict` 判定：
+- **NEEDS_SERVICE** — `*TST?` 非零或错误队列含自检错误码（NVRAM 校验和失败等），按手册第 41 页需返修
+- **WARNING** — 保护位置位或测量返回无效占位符 `9.91e+37`
+- **USABLE** — 一切正常
+
+Questionable 状态位映射依据手册 Table 8-5：bit0=OV, bit1=OCP, bit4=OT(过温), bit5=SD/OS(传感线开路), bit9=RI, bit10=UNR, bit14=MeasOvld。
+
 ## Modbus 温箱（恒温恒湿试验箱）
 
 Modbus-RTU 恒温恒湿试验箱，支持定值运行与程式（程序）控制。协议：9600 8N1, CRC-16/MODBUS, 站地址 1。
@@ -249,13 +273,13 @@ instrument-mcp/
 │   ├── server.py            # MCP Server entry point
 │   ├── instruments.py       # Instrument abstraction layer (VISA, Modbus, USB)
 │   ├── dslogic_usb.py       # Low-level DSLogic U3Pro16 USB controller
-│   └── commands/
-│       ├── __init__.py      # YAML command loader
-│       ├── mxa.yaml         # MXA spectrum analyzer commands
-│       ├── cmw.yaml         # CMW500 commands
-│       ├── keysight_ps.yaml # Power supply commands
-│       ├── dslogic.yaml     # DSLogic U3Pro16 commands
-│       └── generic.yaml     # Generic SCPI commands
+│   ├── commands/            # YAML command definitions + Python handlers
+│   │   ├── __init__.py      # YAML command loader
+│   │   ├── keysight_ps.yaml # Power supply commands (incl. diagnostics)
+│   │   ├── keysight_ps_handler.py
+│   │   └── ...
+│   └── diagnostics/         # 诊断与健康检查模块
+│       └── keysight_ps_diag.py  # 66300 系列电源健康检查 + 保护清除
 ├── pyproject.toml
 └── README.md
 ```

@@ -290,3 +290,32 @@ commands:
       readOnlyHint: true
     params: []
     handler: "instrument_mcp.commands.keysight_ps_handler.ps_get_acquire_config"
+
+  # ─────────────────────────────────────────────
+  # 诊断与健康检查（66300 系列通用）
+  # 寄存器位映射依据手册 Table 4-1/7-1/8-5
+  # ─────────────────────────────────────────────
+  - name: ps_health_check
+    description: >
+      一键只读健康检查：自检(*TST?) + 错误队列排空 + 标准事件(*ESR?) +
+      Questionable状态寄存器解码 + 保护配置 + 测量有效性判定(检测9.91e+37占位符)。
+      返回综合 verdict：USABLE(正常) / WARNING(保护置位或测量无效) /
+      NEEDS_SERVICE(自检非零或错误队列含硬件级错误码，按手册第41页需返修)。
+      不改变仪器状态。
+    annotations:
+      readOnlyHint: true
+    params: []
+    handler: "instrument_mcp.diagnostics.keysight_ps_diag.ps_health_check"
+
+  - name: ps_clear_protection
+    description: >
+      清除输出保护锁存(*CLS + OUTP:PROT:CLE)，可选关闭过压保护(OVP)，
+      读回 QUES 确认是否清除成功。若故障源仍存在则清不掉(手册第111页)。
+    annotations:
+      destructiveHint: false
+    params:
+      - name: disable_ovp
+        type: boolean
+        description: 是否同时关闭过压保护(VOLT:PROT:STAT OFF)，用于排查OV是否误报。默认 false。
+        default: false
+    handler: "instrument_mcp.diagnostics.keysight_ps_diag.ps_clear_protection"
