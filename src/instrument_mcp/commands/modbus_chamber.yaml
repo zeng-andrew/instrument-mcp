@@ -4,15 +4,27 @@ description: Modbus-RTU 恒温恒湿试验箱（MODBUS-1 协议, RS-232C, 9600 8
 # 连接方式（Modbus 仪器无 *IDN?，必须显式指定类型）:
 #   connect(address="COM30", instrument_type="modbus_chamber", alias="chamber")
 #
-# 寄存器映射（实物验证）:
+# 寄存器映射（实物验证 COM30, 2026-08，面板对照确认）:
 #   0x0001  温度 PV（只读, ×100, 有符号）
 #   0x0005  湿度 PV（只读, ×10）
 #   0x0007  输出量 MV（只读, ×10）
-#   0x000A  运行标志（只读, 1=运行）
-#   0x0065  运行控制（写 1=定值运行, 写 4=停止）
+#   0x000A  运行标志（只读, 0=停止 2=运行）
+#   0x0064  程式号选择（写=切换段表到该程式; 停止=5, 运行=程式号）
+#   0x0065  运行控制（写 1=定值/程式运行, 写 4=停止; 程式运行=先写0x0064选程式号再写1）
 #   0x0066  温度 SV（读写, ×100, 有符号）
 #   0x0067  湿度 SV（读写, ×10）
 #   0x0002  工作温度设定（只读, 勿写）
+#
+# 运行态寄存器: reg25=当前程式号 reg26=当前段号 reg27/28=剩余时/分
+#   reg32=循环(只读) reg35/36=段温度 reg37=湿度 reg39=段时间
+#
+# 段表寄存器（分块存储, 每块100段, 写0x0064选程式号后可读写）:
+#   reg1301=温度(×100) reg1401=湿度(×10,0=OFF) reg1501=时间(×100,小时)
+#   reg1601=循环 reg1701=TS1 reg1801=TS2 reg1901=TS3 reg2001=TS4
+#   TS值: 0=关闭 1=打开 2=动作1 3=动作2; 空段=0xB1E0
+#
+# ⚠ 限制: 段数寄存器(reg41)只读, 无法 Modbus 新增段/新建程式;
+#   新增段或新建程式须面板操作(可面板复制后 Modbus 修改)
 
 model_keywords: []
 
@@ -107,3 +119,139 @@ commands:
       destructiveHint: true
     params: []
     handler: "instrument_mcp.commands.modbus_chamber_handler.handler_stop"
+
+  # ═══════════════════════════════════════════════
+  # 程式（程序控制）命令
+  # 读取/编辑程式段表、读取运行状态。
+  #
+  # 段表寄存器（分块存储, 每块100段, 写0x0064选程式号后可读写）:
+  #   reg1301 温度(×100)  reg1401 湿度(×10,0=OFF)  reg1501 时间(×100,小时)
+  #   reg1601-1901 时序信号TS1-TS4
+  #
+  # ⚠ 程式启动(写0x0065=2)不被接受，须在面板启动。
+  # ═══════════════════════════════════════════════
+
+  - name: mc_prog_status
+    description: "读取程式运行状态：运行标志、当前程式号/段号、剩余时间、当前段设定(温度/湿度/时间)、循环次数，返回 JSON"
+    annotations:
+      readOnlyHint: true
+    params: []
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_prog_status"
+
+  - name: mc_prog_read_seg
+    description: "读取指定程式某一段设定（温度、湿度、时间、TS1..4）"
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: prog_no
+        type: integer
+        description: 程式号，默认 1
+        default: 1
+      - name: seg_no
+        type: integer
+        description: 段号（1-based），默认 1
+        default: 1
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_prog_read_seg"
+
+  - name: mc_prog_read_table
+    description: "读取指定程式完整段表（前 N 段），返回 JSON"
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: prog_no
+        type: integer
+        description: 程式号，默认 1
+        default: 1
+      - name: max_seg
+        type: integer
+        description: 最多读取段数（1-100），默认 20
+        default: 20
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_prog_read_table"
+
+  - name: mc_prog_run
+    description: "启动程式运行：写0x0064选程式号，再写0x0065=1启动。程式段表须已配置"
+    annotations:
+      destructiveHint: true
+    params:
+      - name: prog_no
+        type: integer
+        description: 要运行的程式号，默认 1
+        default: 1
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_prog_run"
+
+  - name: mc_prog_write_seg
+    description: "写入程式某一段设定（温度、湿度、时间、TS1..4），写后读回验证"
+    annotations:
+      destructiveHint: true
+    params:
+      - name: prog_no
+        type: integer
+        description: 程式号，默认 1
+        default: 1
+      - name: seg_no
+        type: integer
+        description: 段号（1-based），默认 1
+        default: 1
+      - name: temp_c
+        type: number
+        description: 该段目标温度（°C），如 85.0、-40.0
+        default: 85.0
+      - name: humidity_rh
+        type: number
+        description: 该段目标湿度（%RH），0 表示不控湿
+        default: 0.0
+      - name: time_min
+        type: integer
+        description: 该段持续时间（分钟）
+        default: 60
+      - name: ts1
+        type: integer
+        description: 时序信号1 (0=OFF 1=ON 2=周期1 3=周期2)
+        default: 0
+      - name: ts2
+        type: integer
+        description: 时序信号2
+        default: 0
+      - name: ts3
+        type: integer
+        description: 时序信号3
+        default: 0
+      - name: ts4
+        type: integer
+        description: 时序信号4
+        default: 0
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_prog_write_seg"
+
+  - name: mc_prog_set_cycle
+    description: "设置程式某一段的循环次数（每段独立循环次数）"
+    annotations:
+      destructiveHint: true
+    params:
+      - name: prog_no
+        type: integer
+        description: 程式号，默认 1
+        default: 1
+      - name: seg_no
+        type: integer
+        description: 段号（1-based），默认 1
+        default: 1
+      - name: cycle
+        type: integer
+        description: 该段循环次数（≥1）
+        default: 1
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_prog_set_cycle"
+
+  - name: mc_prog_clear
+    description: "清空程式段表（将前 N 段温度置为空段标记）"
+    annotations:
+      destructiveHint: true
+    params:
+      - name: prog_no
+        type: integer
+        description: 程式号，默认 1
+        default: 1
+      - name: max_seg
+        type: integer
+        description: 清空段数（1-100），默认 20
+        default: 20
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_prog_clear"

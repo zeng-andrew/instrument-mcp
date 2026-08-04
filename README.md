@@ -37,6 +37,44 @@ Before installing, ensure you have:
 | Keysight 66311B / 66311 | DC Power Supply | VISA (GPIB) |
 | DreamSourceLab DSLogic U3Pro16 | USB Logic Analyzer | USB (pyusb + libusb-1.0) |
 | Generic SCPI instruments | Any | VISA |
+| Modbus-RTU 恒温恒湿试验箱 | Chamber | Serial (RS-232C) |
+
+## Modbus 温箱（恒温恒湿试验箱）
+
+Modbus-RTU 恒温恒湿试验箱，支持定值运行与程式（程序）控制。协议：9600 8N1, CRC-16/MODBUS, 站地址 1。
+
+### Connection
+
+```
+connect(address="COM30", instrument_type="modbus_chamber", alias="chamber")
+```
+
+### 定值模式命令
+
+| 命令 | 功能 |
+|------|------|
+| `mc_read_pv` | 读取当前温度 PV |
+| `mc_read_sv` / `mc_set_sv` | 读取/设置设定温度 SV |
+| `mc_read_status` | 读取完整状态（温度/湿度/输出/运行标志） |
+| `mc_read_humidity` / `mc_read_humidity_sv` | 读取湿度 PV/SV |
+| `mc_set_humidity_sv` | 设置目标湿度 SV |
+| `mc_run` / `mc_stop` | 启动/停止定值运行 |
+
+### 程式控制命令
+
+| 命令 | 功能 |
+|------|------|
+| `mc_prog_read_table` | 读取任意程式的完整段表（温度/湿度/时间/循环/TS1-4） |
+| `mc_prog_read_seg` | 读取指定程式的某一段 |
+| `mc_prog_write_seg` | 修改已有段的设定（温度/湿度/时间/TS） |
+| `mc_prog_set_cycle` | 设置某段的循环次数 |
+| `mc_prog_status` | 读取程式运行状态（程式号/段号/剩余时间） |
+| `mc_prog_run` | 启动程式运行 |
+| `mc_prog_clear` | 清空段表 |
+
+**程式启动方法**：先写 `0x0064` 选定程式号，再写 `0x0065=1` 启动（与定值运行同值，区别在选程式号）。
+
+**硬件限制**（COM30 实测）：段数寄存器(reg41)只读，无法通过 Modbus 新增段或新建程式。新增段/新建程式须在面板操作——推荐在面板上把已有程式**复制**到目标号，再用 `mc_prog_write_seg` / `mc_prog_set_cycle` 远程修改各段参数。
 
 ## DSLogic U3Pro16 Logic Analyzer
 
