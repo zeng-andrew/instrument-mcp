@@ -1,0 +1,230 @@
+instrument_type: tinysa
+description: tinySA / tinySA Ultra+（Zeeenko ZS-407）频谱仪（USB 串口协议）
+model_keywords:
+  - "TINYSA"
+  - "ZS407"
+  - "ULTRA+"
+commands:
+  - name: tinysa_identity
+    description: 读取 tinySA 设备型号、固件版本与硬件信息
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_identity
+
+  - name: tinysa_sweep_get
+    description: 读取当前扫描频率范围、点数和设备状态
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_sweep_get
+
+  - name: tinysa_sweep_set
+    description: 设置频谱扫描频率范围（start/stop、center、span 或 cw 连续波模式）
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: start_hz
+        type: number
+        description: 起始频率(Hz)，如 100000000 或 "100M"
+        default: null
+      - name: stop_hz
+        type: number
+        description: 停止频率(Hz)，如 500000000 或 "500M"
+        default: null
+      - name: center_hz
+        type: number
+        description: 中心频率(Hz)，如 300000000
+        default: null
+      - name: span_hz
+        type: number
+        description: 频率跨度(Hz)，如 100000000
+        default: null
+      - name: cw_hz
+        type: number
+        description: 连续波单点频率(Hz)，跨度归零
+        default: null
+      - name: points
+        type: integer
+        description: 扫描点数（配合 start_hz+stop_hz 使用，默认保持当前）
+        default: null
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_sweep_set
+
+  - name: tinysa_scan
+    description: 执行频谱扫描（文本模式）并返回频率/电平数据与峰值，点数上限 290
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: start_hz
+        type: number
+        description: 起始频率(Hz)
+        default: 100000000
+      - name: stop_hz
+        type: number
+        description: 停止频率(Hz)
+        default: 500000000
+      - name: points
+        type: integer
+        description: 扫描点数（2~290）
+        default: 101
+      - name: csv_path
+        type: string
+        description: 可选，全量数据保存为 CSV 文件路径
+        default: ""
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_scan
+
+  - name: tinysa_scanraw
+    description: 执行频谱扫描（二进制模式，更快）并返回频率/电平数据与峰值，点数可超 290
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: start_hz
+        type: number
+        description: 起始频率(Hz)
+        default: 100000000
+      - name: stop_hz
+        type: number
+        description: 停止频率(Hz)
+        default: 500000000
+      - name: points
+        type: integer
+        description: 扫描点数（2~2000）
+        default: 101
+      - name: csv_path
+        type: string
+        description: 可选，全量数据保存为 CSV 文件路径
+        default: ""
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_scanraw
+
+  - name: tinysa_marker
+    description: 控制频谱 Marker（peak 定位最强信号 / on / off / freq 设置到指定频率）
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: action
+        type: string
+        description: "peak=定位最强信号, on=开启, off=关闭, freq=设置到指定频率"
+        default: "peak"
+      - name: marker_id
+        type: integer
+        description: 标记编号（1~8）
+        default: 1
+      - name: frequency_hz
+        type: number
+        description: action=freq 时的目标频率(Hz)
+        default: 0
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_marker
+
+  - name: tinysa_pause
+    description: 暂停频谱扫描（冻结当前画面/数据）
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_pause
+
+  - name: tinysa_resume
+    description: 恢复频谱扫描
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_resume
+
+  - name: tinysa_freq
+    description: 暂停扫描并定点测量指定频率的电平（如 350000000）
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: frequency_hz
+        type: number
+        description: 目标测量频率(Hz)
+        default: 100000000
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_freq
+
+  - name: tinysa_settings
+    description: 配置测量设置（RBW 分辨率带宽、衰减、重复次数、触发、测量模式、外部增益补偿）
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: rbw
+        type: string
+        description: 分辨率带宽 kHz（如 "100"）或 "auto"
+        default: null
+      - name: attenuate
+        type: string
+        description: 内部衰减 dB（0~31）或 "auto"
+        default: null
+      - name: repeat
+        type: integer
+        description: 每频率测量次数（1~1000），增大可降低噪声
+        default: null
+      - name: trigger
+        type: string
+        description: 触发模式 auto/normal/single 或触发电平(dBm)
+        default: null
+      - name: calc
+        type: string
+        description: 测量模式 off/minh/maxh/maxd/aver4/aver16/quasip
+        default: null
+      - name: ext_gain
+        type: number
+        description: 外部衰减/增益补偿（-100~100 dB）
+        default: null
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_settings
+
+  - name: tinysa_capture
+    description: 抓取 tinySA 屏幕截图并保存为 BMP 文件（480x320）
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: output_path
+        type: string
+        description: 输出文件路径（.bmp），默认 tinysa_screen.bmp
+        default: "tinysa_screen.bmp"
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_capture
+
+  - name: tinysa_raw_command
+    description: 直接发送任意 tinySA 串口命令并返回响应（用于探索新功能）
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: command
+        type: string
+        description: tinySA 命令，如 "help" / "vbat" / "spur on"
+        default: "help"
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_raw_command

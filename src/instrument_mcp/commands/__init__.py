@@ -121,7 +121,11 @@ def _make_tool_handler(
 
             # 自定义 handler（预留扩展点）
             if handler:
-                module_path, func_name = handler.rsplit(".", 1)
+                # 支持 "module.path:func" 与 "module.path.func" 两种写法
+                if ":" in handler:
+                    module_path, func_name = handler.split(":", 1)
+                else:
+                    module_path, func_name = handler.rsplit(".", 1)
                 mod = __import__(module_path, fromlist=[func_name])
                 func = getattr(mod, func_name)
                 result = func(inst, **kwargs)

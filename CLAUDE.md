@@ -62,6 +62,31 @@ Example:
     write: "FREQ:CENT {freq_mhz} MHz"
 ```
 
+## tinySA / tinySA Ultra+ (tinysa)
+
+Zeeenko ZS-407 etc. — firmware `tinySA4_v1.4-217` verified (COM44, USB CDC).
+Not VISA/SCPI: plain text commands over serial, responses end with the `ch> `
+prompt; `TinySAInstrument` in `instruments.py` handles echo/prompt/binary IO.
+
+```python
+connect(address="COM44", instrument_type="tinysa", alias="sa")
+```
+
+Key tools (from `commands/tinysa.yaml`, handlers in `tinysa_handler.py`):
+- `tinysa_sweep_get` / `tinysa_sweep_set` — scan range + points (`sweep` cmd)
+- `tinysa_scan` — text sweep, returns freq/level CSV; `tinysa_scanraw` — binary
+  sweep, returns dBm CSV (points up to 290 vs unlimited, 10-50x faster)
+- `tinysa_marker` — peak/on/off; `tinysa_freq` — single-point level at a
+  frequency (uses one-point scan; `marker N <freq>` has no readback)
+- `tinysa_capture` — screenshot, returns path to a 480x320 RGB565->BMP file
+- `tinysa_raw_command` — pass through any command (`help` lists all)
+
+Verified quirks: `scan` needs `outmask 3` for the frequency column; `scanraw`
+bytes are LSB-first (docs say MSB); dBm = raw/32 - 174 (Ultra); capture is
+307200 bytes fixed (must read exactly, pixel data can contain `ch> `); the
+COM port is STM32 USB CDC so baud rate is cosmetic; enlarge pyserial RX buffer
+(`set_buffer_size`) to avoid overflow. Full notes: `docs/tinysa_zs407.md`.
+
 ## Testing
 
 ### Manual testing with MCP inspector

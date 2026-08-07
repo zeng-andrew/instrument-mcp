@@ -18,6 +18,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run_program）+ FC=16 协议支持 + 单元测试 16 项全部通过
 
 ### Added
+- 新增 tinySA / tinySA Ultra+（Zeeenko ZS-407，COM44 实物验证 2026-08）频谱仪支持：
+  - `TinySAInstrument` 串口驱动（`instruments.py`）：文本命令 + "ch> " 提示符协议，
+    scanraw 二进制解码（dBm = raw/32 - 174）、capture 480x320 RGB565 帧读取；
+    兼容 open/close/write/query 接口，`*IDN?` 映射为 info 输出
+  - `commands/tinysa.yaml` + `tinysa_handler.py` 共 12 个 MCP 工具：
+    tinysa_identity / tinysa_sweep_get / tinysa_sweep_set / tinysa_scan /
+    tinysa_scanraw / tinysa_marker / tinysa_pause / tinysa_resume /
+    tinysa_freq（定点测电平）/ tinysa_settings / tinysa_capture（截图 BMP）/
+    tinysa_raw_command（任意命令透传）
+  - 协议实测要点：COM44 为 STM32 USB CDC（VID 0483）传输不限于波特率；
+    scanraw 线上字节序为 LSB 在前；capture 帧后跟 "ch> " 提示符
+- 修复 YAML 自定义 handler 加载 bug（`commands/__init__.py`）：原 `rsplit(".", 1)`
+  不支持 `module.path:func` 写法导致所有 handler 型命令（dslogic/temi880/
+  keysight_ps/modbus_chamber/tinysa）执行时报
+  `module 'instrument_mcp.commands' has no attribute 'xxx:func'`；现优先按冒号切分
 - 新增 `diagnostics/` 诊断子包及 keysight_ps 诊断命令（66300系列通用，实物验证
   66321B GPIB0::5 2026-08）：
   - ps_health_check: 一键只读健康检查，返回综合 verdict。覆盖项: *TST?自检 +

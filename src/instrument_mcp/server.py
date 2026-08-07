@@ -14,12 +14,19 @@ Instrument MCP Server - 仪器控制 MCP 服务器
 - R&S CMW500 无线通信测试仪 (cmw)
 - Keysight 66311B 直流电源 (keysight_ps)
 - DreamSourceLab DSLogic U3Pro16 USB 逻辑分析仪 (dslogic)
+- tinySA / tinySA Ultra+ 频谱仪 (tinysa，Zeeenko ZS-407 等，串口协议)
 - 通用 SCPI 仪器 (generic)
 
 DSLogic 连接示例:
 - connect(address="USB", instrument_type="dslogic", alias="la")
 - dslogic_get_status(alias="la")
 - dslogic_monitor_level(alias="la", samplerate_mhz=10, duration=5)
+
+tinySA 连接示例:
+- connect(address="COM44", instrument_type="tinysa", alias="sa")
+- tinysa_scan(alias="sa", start_hz=100000000, stop_hz=500000000, points=101)
+- tinysa_marker(alias="sa", action="peak")
+- tinysa_capture(alias="sa", output_path="screen.bmp")
 
 项目级命令扩展:
 - 运行 init_project_commands() 会在当前目录创建 .instrument_mcp/

@@ -390,6 +390,155 @@ class DSLogicInstrument:
         self.close()
 
 
+class TinySAInstrument:
+    """tinySA / tinySA Ultra+（Zeeenko ZS-407）频谱仪，USB 串口行协议。
+
+    与 VisaInstrument 保持 open/close/write/query 接口兼容，使 server.connect()
+    可以统一处理。协议要点（详见 tinysa.org/wiki USBInterface 页面）：
+    - 文本命令以 \\r\\n 结尾；设备先回显命令，响应以 "ch> " 提示符结束
+    - 频率可用整数或 k/M/G 后缀（如 300M），电平单位 dBm
+    - scanraw 返回二进制："{" + 每点 ("x" LSB MSB 16bit) + "}"
+      dBm = raw/32 - 174（tinySA4 / Ultra 系）
+    - capture 返回 480x320 像素 RGB565（小端 2 字节/像素）= 307200 字节，
+      随后跟随 "ch> " 提示符
+    - 经 USB 连接（STM32 USB CDC, VID 0483）时波特率仅示意，数据按 USB 速度
+      传输；经 UART 引脚连接时按波特率传输
+    """
+
+    LCD_WIDTH = 480
+    LCD_HEIGHT = 320
+
+    def __init__(self, address: str = "COM44", baud_rate: int = 115200,
+                 timeout: float = 0.5):
+        self.address = address
+        self.baud_rate = baud_rate
+        self.timeout = timeout
+        self._ser = None
+
+    def open(self) -> None:
+        import serial
+        last = None
+        for _ in range(3):
+            try:
+                self._ser = serial.Serial(
+                    self.address, self.baud_rate, bytesize=8,
+                    parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE,
+                    timeout=self.timeout,
+                )
+                try:
+                    # USB CDC 突发传输很快，放大接收缓冲避免丢字节
+                    self._ser.set_buffer_size(rx_size=4 * 1024 * 1024, tx_size=4096)
+                except Exception:
+                    pass
+                time.sleep(0.3)
+                self._ser.reset_input_buffer()
+                logger.info(f"tinySA connected: {self.address} @ {self.baud_rate}")
+                return
+            except Exception as e:
+                last = e
+                time.sleep(0.5)
+        raise RuntimeError(f"无法打开 {self.address}: {last}")
+
+    def close(self) -> None:
+        if self._ser:
+            try:
+                self._ser.close()
+            except Exception as e:
+                logger.warning(f"Error closing serial port: {e}")
+            self._ser = None
+        logger.info(f"tinySA disconnected: {self.address}")
+
+    def _send(self, command: str) -> None:
+        if self._ser is None:
+            raise RuntimeError("Instrument not connected")
+        cmd = command.strip()
+        if not cmd:
+            return
+        self._ser.write((cmd + "\r\n").encode("ascii"))
+
+    def _consume_echo(self, command: str, timeout: float = 2.0) -> None:
+        """读取并丢弃设备回显的命令行（{command}\\r\\n）。"""
+        want = command.encode("ascii") + b"\r\n"
+        seen = bytearray()
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            b = self._ser.read(1)
+            if not b:
+                continue
+            seen.append(b[0])
+            idx = seen.find(want)
+            if idx >= 0:
+                if idx:
+                    logger.warning(f"回显前多余数据 {idx}B: {bytes(seen[:idx])!r}")
+                return
+        logger.warning(f"未匹配到命令回显 {command!r}，已读 {bytes(seen)!r}")
+
+    def _read_until_prompt(self, timeout: float = 8.0) -> bytes:
+        """读取串口直到 "ch> " 提示符，返回提示符之前的全部字节。"""
+        buf = bytearray()
+        marker = b"ch> "
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            chunk = self._ser.read(4096)
+            if chunk:
+                buf += chunk
+                idx = buf.find(marker)
+                if idx >= 0:
+                    return bytes(buf[:idx])
+        raise TimeoutError(
+            f"等待 'ch> ' 提示符超时 ({timeout}s)，已收 {len(buf)} 字节"
+        )
+
+    def _get_idn(self) -> str:
+        """*IDN? 模拟：返回 info 输出的型号与版本信息首行。"""
+        self._send("info")
+        self._consume_echo("info")
+        data = self._read_until_prompt(8.0)
+        lines = data.decode("ascii", errors="replace").splitlines()
+        return "\n".join(lines[:4])
+
+    def write(self, command: str) -> None:
+        self._send(command)
+        self._consume_echo(command)
+
+    def query(self, command: str, timeout: float = 8.0) -> str:
+        if command.strip().upper() == "*IDN?":
+            return self._get_idn()
+        self._send(command)
+        self._consume_echo(command)
+        data = self._read_until_prompt(timeout)
+        return data.decode("ascii", errors="replace").strip()
+
+    def raw_query(self, command: str, timeout: float = 15.0) -> bytes:
+        """发送命令并返回去除回显与提示符的原始字节（二进制安全）。
+
+        注意: 仅适用于响应中不会出现 "ch> " 字节序列的命令
+        （scanraw 的电平原始值远达不到 0x68 高字节，可安全使用）。
+        """
+        self._send(command)
+        self._consume_echo(command)
+        return self._read_until_prompt(timeout)
+
+    def read_exact(self, n: int, timeout: float = 15.0) -> bytes:
+        """读取精确 n 字节（用于 capture 等纯二进制传输）。"""
+        buf = bytearray()
+        deadline = time.time() + timeout
+        while len(buf) < n and time.time() < deadline:
+            chunk = self._ser.read(n - len(buf))
+            if chunk:
+                buf += chunk
+        if len(buf) < n:
+            raise TimeoutError(f"读取 {n} 字节超时 ({timeout}s)，仅收到 {len(buf)}")
+        return bytes(buf)
+
+    def __enter__(self):
+        self.open()
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
 # 仪器注册表：新增仪器时在此注册
 INSTRUMENT_REGISTRY = {
     "mxa": (VisaInstrument, "Keysight MXA / EXA 系列频谱仪（通用 VISA 驱动）"),
@@ -397,6 +546,7 @@ INSTRUMENT_REGISTRY = {
     "temperature_chamber": (VisaInstrument, "环境试验箱 / 温箱（Espec / Thermotron / CSZ 等）"),
     "modbus_chamber": (SerialModbusInstrument, "Modbus-RTU 恒温恒湿试验箱（MODBUS-1 协议, RS-232C）"),
     "dslogic": (DSLogicInstrument, "DreamSourceLab DSLogic U3Pro16 USB 逻辑分析仪"),
+    "tinysa": (TinySAInstrument, "tinySA / tinySA Ultra+（Zeeenko ZS-407）频谱仪（USB 串口协议）"),
     "generic": (VisaInstrument, "通用 SCPI 仪器"),
 }
 
