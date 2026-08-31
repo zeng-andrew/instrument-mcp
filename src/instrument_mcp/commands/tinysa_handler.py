@@ -113,7 +113,8 @@ def _save_csv(rows, path: str) -> str:
 
 
 def _scan_timeout(points: int) -> float:
-    return max(10.0, 3.0 + points * 0.03)
+    # Ultra 模式约 6 pts/s（0.17s/点），0.3s/点留足余量；上限 120s
+    return min(120.0, max(15.0, points * 0.3))
 
 
 # ─────────────────────────────────────────────
@@ -232,6 +233,9 @@ def tinysa_scan(
     rows = _parse_scan_text(resp)
     if not rows:
         return f"[FAIL] 扫描无有效数据: {resp[:200]!r}"
+    note = ""
+    if len(rows) != pts:
+        note = f"\n  [警告] 数据不完整: 期望 {pts} 点，收到 {len(rows)} 点（可能超时截断）"
     pf, pl = _peak(rows)
     csv_note = ""
     if csv_path:
@@ -239,7 +243,7 @@ def tinysa_scan(
         csv_note = f"\n  已保存 CSV: {path}"
     return (
         f"[PASS] 频谱扫描 {_freq_text(float(start))} - {_freq_text(float(stop))}"
-        f"，{len(rows)} 点，耗时 {dt:.1f}s\n"
+        f"，{len(rows)} 点，耗时 {dt:.1f}s{note}\n"
         f"  峰值: {_freq_text(pf)} @ {pl:.2f} dBm\n"
         f"  数据 (频率Hz, dBm):\n{_fmt_table(rows, 20)}{csv_note}"
     )
@@ -275,6 +279,9 @@ def tinysa_scanraw(
     if not levels:
         return f"[FAIL] scanraw 无有效数据: {payload[:200]!r}"
     n = len(levels)
+    note = ""
+    if n != pts:
+        note = f"\n  [警告] 数据不完整: 期望 {pts} 点，收到 {n} 点（可能超时截断）"
     rows = []
     for i in range(n):
         f = start + (stop - start) * i / (n - 1) if n > 1 else start
@@ -286,7 +293,7 @@ def tinysa_scanraw(
         csv_note = f"\n  已保存 CSV: {path}"
     return (
         f"[PASS] 频谱扫描(快速) {_freq_text(float(start))} - {_freq_text(float(stop))}"
-        f"，{n} 点，耗时 {dt:.1f}s\n"
+        f"，{n} 点，耗时 {dt:.1f}s{note}\n"
         f"  峰值: {_freq_text(pf)} @ {pl:.2f} dBm\n"
         f"  数据 (频率Hz, dBm):\n{_fmt_table(rows, 20)}{csv_note}"
     )
@@ -464,6 +471,267 @@ def _rgb565_to_bmp(px: bytes, width: int, height: int) -> bytes:
             row[x * 3 + 2] = r << 3
         out += row
     return bytes(out)
+
+
+def _is_number(s: str) -> bool:
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+
+def _parse_num_lines(text: str) -> list:
+    """解析每行一个数字的响应（如 data / frequencies）。"""
+    rows = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(float(line.split()[0]))
+        except (ValueError, IndexError):
+            continue
+    return rows
+
+
+def tinysa_data(inst, alias: str = "default", trace_index: int = 2,
+                csv_path: str = "") -> str:
+    """读取轨迹数据（0=当前, 1=已存储, 2=测量），电平 dBm 每行一个。
+
+    点数等于当前扫描点数，频率可配合 tinysa_frequencies 获取。
+    """
+    idx = int(trace_index)
+    if idx not in (0, 1, 2):
+        return f"[FAIL] trace_index 必须是 0/1/2: {idx}"
+    resp = inst.query(f"data {idx}", timeout=15.0)
+    levels = _parse_num_lines(resp)
+    if not levels:
+        return f"[FAIL] 轨迹 {idx} 无数据: {resp[:200]!r}"
+    note = ""
+    if csv_path:
+        p = Path(csv_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["index", "level_dbm"])
+            for i, v in enumerate(levels):
+                w.writerow([i, f"{v:.3f}"])
+        note = f"\n  已保存 CSV: {p}"
+    pi = max(range(len(levels)), key=lambda i: levels[i])
+    shown = ", ".join(f"{v:.2f}" for v in levels[:20])
+    more = (
+        f"\n  ... 共 {len(levels)} 点，已省略 {len(levels) - 20} 点"
+        if len(levels) > 20
+        else ""
+    )
+    return (
+        f"[PASS] 轨迹 {idx} 数据（dBm），{len(levels)} 点\n"
+        f"  峰值: 索引 {pi} @ {levels[pi]:.2f} dBm\n"
+        f"  电平: {shown}{more}{note}"
+    )
+
+
+def tinysa_frequencies(inst, alias: str = "default", limit: int = 20) -> str:
+    """读取上次扫描的频点列表。"""
+    resp = inst.query("frequencies", timeout=10.0)
+    freqs = [int(v) for v in _parse_num_lines(resp)]
+    if not freqs:
+        return f"[FAIL] 无法解析频点: {resp[:200]!r}"
+    shown = freqs[: max(1, int(limit))]
+    lines = [f"    {_freq_text(f)}  ({f})" for f in shown]
+    if len(freqs) > len(shown):
+        lines.append(f"    ... 共 {len(freqs)} 点，已省略 {len(freqs) - len(shown)} 点")
+    return f"[PASS] 上次扫描频点 {len(freqs)} 个:\n" + "\n".join(lines)
+
+
+def tinysa_status(inst, alias: str = "default") -> str:
+    """读取设备扫描状态（Resumed/Paused 等）。"""
+    resp = inst.query("status", timeout=5.0).strip()
+    return f"[PASS] 设备状态: {resp}"
+
+
+def tinysa_trigger(inst, alias: str = "default", mode: str = "auto") -> str:
+    """设置触发模式（auto/normal/single 或触发电平 dBm）。"""
+    v = str(mode).strip().lower()
+    if v not in ("auto", "normal", "single") and not _is_number(v):
+        return f"[FAIL] 无效触发设置: {v}（auto/normal/single/电平dBm）"
+    inst.query(f"trigger {v}", timeout=5.0)
+    return f"[PASS] 触发已设置: {v}"
+
+
+def tinysa_trace(
+    inst,
+    alias: str = "default",
+    unit: str = None,
+    action: str = None,
+    scale: str = None,
+    reflevel: str = None,
+) -> str:
+    """读取轨迹信息（单位/参考电平/量程），或设置轨迹属性。
+
+    Args:
+        unit: 显示单位 dBm/dBmV/dBuV/V/W
+        action: store=存储当前轨迹 / clear=清除 / subtract=相减显示
+        scale: 垂直量程（auto 或数字 dB）
+        reflevel: 参考电平（auto 或数字 dBm）
+    """
+    cmds = []
+    if action is not None:
+        a = str(action).strip().lower()
+        if a not in ("store", "clear", "subtract"):
+            return f"[FAIL] 无效 action: {a}（store/clear/subtract）"
+        cmds.append(("action", f"trace {a}"))
+    if unit is not None:
+        u = str(unit).strip().lower()
+        if u not in ("dbm", "dbmv", "dbuv", "v", "w"):
+            return f"[FAIL] 无效单位: {u}（dBm/dBmV/dBuV/V/W）"
+        cmds.append(("unit", f"trace {u}"))
+    if scale is not None:
+        s = str(scale).strip()
+        if s.lower() != "auto" and not _is_number(s):
+            return f"[FAIL] 无效量程: {s}（auto 或数字 dB）"
+        cmds.append(("scale", f"trace scale {s}"))
+    if reflevel is not None:
+        r = str(reflevel).strip()
+        if r.lower() != "auto" and not _is_number(r):
+            return f"[FAIL] 无效参考电平: {r}（auto 或数字 dBm）"
+        cmds.append(("reflevel", f"trace reflevel {r}"))
+
+    if cmds:
+        done = []
+        for name, cmd in cmds:
+            try:
+                inst.query(cmd, timeout=5.0)
+                done.append(f"{name} -> {cmd.split(' ', 1)[1]}")
+            except Exception as e:
+                done.append(f"{name} -> 失败: {e}")
+        return "[PASS] 轨迹设置已应用:\n  " + "\n  ".join(done)
+
+    resp = inst.query("trace", timeout=5.0)
+    parts = resp.split()
+    if len(parts) >= 4 and parts[1] in ("dBm", "dBmV", "dBuV", "V", "W"):
+        return (
+            f"[PASS] 当前轨迹信息\n"
+            f"  单位: {parts[1]}\n"
+            f"  参考电平: {parts[2]} dBm\n"
+            f"  垂直量程: {parts[3]} dB"
+        )
+    return f"[PASS] 轨迹信息:\n{resp}"
+
+
+def tinysa_hop(
+    inst,
+    alias: str = "default",
+    start_hz: float = 100000000,
+    stop_hz: float = 500000000,
+    step_hz: float = None,
+    points: int = None,
+    csv_path: str = "",
+) -> str:
+    """多点定点测量（Ultra）：从 start 到 stop 逐频点测电平。
+
+    第三个参数 <450 视为点数，否则视为步进频率(Hz)。频点含两端点。
+    """
+    start = _freq_num(start_hz)
+    stop = _freq_num(stop_hz)
+    if step_hz is not None and points is not None:
+        return "[FAIL] step_hz 与 points 只能提供一个"
+    mid = ""
+    if step_hz is not None:
+        mid = f" {int(_freq_num(step_hz))}"
+    elif points is not None:
+        mid = f" {max(2, int(points))}"
+    t0 = time.time()
+    resp = inst.query(f"hop {start} {stop}{mid} 3", timeout=_scan_timeout(2000) + 10)
+    dt = time.time() - t0
+    rows = _parse_scan_text(resp)
+    if not rows:
+        return f"[FAIL] hop 无有效数据: {resp[:200]!r}"
+    pf, pl = _peak(rows)
+    note = ""
+    if csv_path:
+        path = _save_csv(rows, csv_path)
+        note = f"\n  已保存 CSV: {path}"
+    return (
+        f"[PASS] 多点测量 {_freq_text(float(start))} - {_freq_text(float(stop))}"
+        f"，{len(rows)} 点，耗时 {dt:.1f}s\n"
+        f"  峰值: {_freq_text(pf)} @ {pl:.2f} dBm\n"
+        f"  数据 (频率Hz, dBm):\n{_fmt_table(rows, 20)}{note}"
+    )
+
+
+def tinysa_vbat(inst, alias: str = "default") -> str:
+    """读取电池电压。"""
+    resp = inst.query("vbat", timeout=5.0).strip()
+    return f"[PASS] 电池电压: {resp}"
+
+
+def tinysa_caloutput(inst, alias: str = "default", frequency_mhz: str = "off") -> str:
+    """校准信号输出（off 或 30/15/10/4/3/2/1 MHz）。"""
+    v = str(frequency_mhz).strip().lower()
+    if v not in ("off", "30", "15", "10", "4", "3", "2", "1"):
+        return f"[FAIL] 无效校准频率: {v}（off/30/15/10/4/3/2/1 MHz）"
+    inst.query(f"caloutput {v}", timeout=5.0)
+    return f"[PASS] 校准信号输出: {'关闭' if v == 'off' else v + ' MHz'}"
+
+
+def tinysa_leveloffset(inst, alias: str = "default", band: str = None,
+                       error_dbm: float = None) -> str:
+    """读取电平校准表，或设置某一校准项的偏移误差(dB)。"""
+    if band is not None and error_dbm is None:
+        return "[FAIL] 写入模式需要同时提供 band 与 error_dbm；只读全表请不填 band"
+    if band is not None:
+        inst.query(f"leveloffset {band} {float(error_dbm)}", timeout=5.0)
+        return f"[PASS] 电平校准已设置: {band} = {float(error_dbm)} dB"
+    resp = inst.query("leveloffset", timeout=10.0)
+    rows = []
+    for line in resp.splitlines():
+        line = line.strip()
+        if line.startswith("leveloffset "):
+            key, val = line.split()[1], line.split()[2]
+            rows.append(f"    {key:<16} {val} dB")
+    if not rows:
+        return f"[PASS] 电平校准数据:\n{resp}"
+    return "[PASS] 电平校准表:\n" + "\n".join(rows)
+
+
+def tinysa_correction(
+    inst,
+    alias: str = "default",
+    table_name: str = None,
+    index: int = None,
+    frequency_hz: float = None,
+    level_dbm: float = None,
+) -> str:
+    """读取或设置频率-电平校正表。
+
+    用法:
+    - tinysa_correction() -> 显示 correction 用法
+    - tinysa_correction(table_name="low") -> 读取 low 表
+    - tinysa_correction(table_name="low", index=0, frequency_hz=100000000,
+      level_dbm=0.5) -> 写入校正点
+    """
+    TABS = (
+        "low", "lna", "ultra", "ultra_lna", "direct", "direct_lna",
+        "harm", "harm_lna", "out", "out_direct", "out_adf", "out_ultra",
+    )
+    if table_name is None:
+        resp = inst.query("correction", timeout=5.0)
+        return f"[PASS] correction 用法:\n{resp}"
+    t = str(table_name).strip().lower()
+    if t not in TABS:
+        return f"[FAIL] 无效校正表: {t}（{'/'.join(TABS)}）"
+    if index is not None or frequency_hz is not None or level_dbm is not None:
+        if index is None or frequency_hz is None or level_dbm is None:
+            return "[FAIL] 写入校正点需要同时提供 index/frequency_hz/level_dbm"
+        if not 0 <= int(index) <= 19:
+            return f"[FAIL] index 范围 0~19: {index}"
+        f = _freq_num(frequency_hz)
+        inst.query(f"correction {t} {int(index)} {f} {float(level_dbm)}", timeout=5.0)
+        return f"[PASS] 校正表 {t} 已写入点 {int(index)}: {_freq_text(f)} @ {float(level_dbm)} dB"
+    resp = inst.query(f"correction {t}", timeout=10.0)
+    return f"[PASS] 校正表 {t}:\n{resp}"
 
 
 def tinysa_raw_command(inst, alias: str = "default", command: str = "") -> str:

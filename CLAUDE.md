@@ -80,12 +80,29 @@ Key tools (from `commands/tinysa.yaml`, handlers in `tinysa_handler.py`):
   frequency (uses one-point scan; `marker N <freq>` has no readback)
 - `tinysa_capture` — screenshot, returns path to a 480x320 RGB565->BMP file
 - `tinysa_raw_command` — pass through any command (`help` lists all)
+- Measurement/calibration: `tinysa_data` (trace 0/1/2 dBm), `tinysa_frequencies`,
+  `tinysa_status`, `tinysa_trigger` (auto/normal/single/level dBm),
+  `tinysa_trace` (unit/scale/reflevel/store/clear/subtract), `tinysa_hop`
+  (Ultra multi-point level list, endpoints inclusive), `tinysa_vbat`,
+  `tinysa_caloutput` (cal signal off/1..30 MHz), `tinysa_leveloffset`
+  (read/write level cal table), `tinysa_correction` (read/write freq
+  correction tables low/lna/ultra/...)
 
 Verified quirks: `scan` needs `outmask 3` for the frequency column; `scanraw`
 bytes are LSB-first (docs say MSB); dBm = raw/32 - 174 (Ultra); capture is
 307200 bytes fixed (must read exactly, pixel data can contain `ch> `); the
 COM port is STM32 USB CDC so baud rate is cosmetic; enlarge pyserial RX buffer
 (`set_buffer_size`) to avoid overflow. Full notes: `docs/tinysa_zs407.md`.
+Official wiki (commands, limits, hardware): https://tinysa.org/wiki/pmwiki.php?n=Main.HomePage
+— check it when unsure about a command or workflow.
+
+**Frequency cap 900 MHz (Ultra mode)**: `sweep` range is silently clamped to
+900 MHz by default because Ultra mode is off (`config.ultra=false` ->
+`NORMAL_MAX_FREQ`). Unlock via serial: `ultra on` then `saveconfig` (the
+`ultra` cmd does NOT auto-save; menu path needs unlock code 4321). After
+unlock, sweep works up to ~12 GHz (default harmonic 3). Ultra mode is slow
+(mirror/spur elimination, ~6 pts/s) and leaks LO into the input. Only `sweep`
+is clamped - `scan`/`scanraw`/`hop` work above 900 MHz even without unlock.
 
 ## Xiaomi smart plug (chuangmi.plug.212a01)
 

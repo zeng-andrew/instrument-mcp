@@ -58,6 +58,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     为准（定值运行时程式号寄存器是残留值，不可作幂等依据）；假从机
     responder 按真固件行为建模（0x0065=1 按 0x0068 模式置位标志），
     单元测试 35 项全部通过
+- tinySA Ultra mode 解锁流程（COM44 实测验证 2026-08）：默认 `config.ultra=false`
+  时 `sweep` 上限被钳制在 900 MHz（固件源码 sa_core.c `update_min_max_freq()`），
+  `ultra on` + `saveconfig` 解锁至 ~12 GHz（harmonic=3，`harmonic×MAX_LO_FREQ−IF`），
+  重启持久（实测确认）；菜单方式需解锁码 4321。Ultra 模式扫描较慢（镜像/杂散
+  消除，3-12G 101 点 ≈16s）、输入端口 LO 泄漏增大。谐波测试流程见
+  docs/tinysa_zs407.md 第 6/7 节
+- tinySA 测量/校准类专用工具（COM44 实物验证 2026-08，tinysa.yaml/tinysa_handler.py）：
+  - tinysa_data: 读取轨迹（0=当前/1=已存储/2=测量，dBm 每行一个，点数=扫描点数）
+  - tinysa_frequencies: 上次扫描频点列表；tinysa_status: 设备状态(Resumed/Paused)
+  - tinysa_trigger: auto/normal/single/触发电平(dBm)；tinysa_trace: 单位/量程/
+    参考电平设置与读取（格式 `{id}: {unit} {reflevel} {scale}`）+ store/clear/subtract
+  - tinysa_hop: Ultra 多点定点测量（第3参<450为点数否则步进Hz，输出 N+1 行含两端点）
+  - tinysa_vbat: 电池电压；tinysa_caloutput: 校准信号输出(off/1..30 MHz)
+  - tinysa_leveloffset: 电平校准表读写（22 项）；tinysa_correction: 频率-电平
+    校正表读写（low/lna/ultra/... 12 张表，每表 20 点）
+  - 实测要点: trigger/caloutput 无参只回用法（无当前值回读）；frequencies 点数=
+    当前扫描点数（非全频点表）
 - 新增 tinySA / tinySA Ultra+（Zeeenko ZS-407，COM44 实物验证 2026-08）频谱仪支持：
   - `TinySAInstrument` 串口驱动（`instruments.py`）：文本命令 + "ch> " 提示符协议，
     scanraw 二进制解码（dBm = raw/32 - 174）、capture 480x320 RGB565 帧读取；

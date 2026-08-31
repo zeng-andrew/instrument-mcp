@@ -214,6 +214,186 @@ commands:
         default: "tinysa_screen.bmp"
     handler: instrument_mcp.commands.tinysa_handler:tinysa_capture
 
+  - name: tinysa_data
+    description: 读取轨迹数据（0=当前测量, 1=已存储轨迹, 2=测量轨迹），电平 dBm，点数=当前扫描点数
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: trace_index
+        type: integer
+        description: 轨迹索引（0=当前, 1=已存储, 2=测量）
+        default: 2
+      - name: csv_path
+        type: string
+        description: 可选，将全量电平保存为 CSV 文件
+        default: ""
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_data
+
+  - name: tinysa_frequencies
+    description: 读取上次扫描的频点列表（配合 tinysa_data 使用）
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: limit
+        type: integer
+        description: 最多显示的频点数
+        default: 20
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_frequencies
+
+  - name: tinysa_status
+    description: 读取设备扫描状态（Running/Resumed/Paused 等）
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_status
+
+  - name: tinysa_trigger
+    description: 设置触发模式（auto/normal/single 或触发电平 dBm，如 -20）
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: mode
+        type: string
+        description: "auto / normal / single / 触发电平(dBm)"
+        default: "auto"
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_trigger
+
+  - name: tinysa_trace
+    description: 读取轨迹信息（单位/参考电平/量程）或设置轨迹（单位、存储/清除/相减、量程、参考电平）
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: unit
+        type: string
+        description: 显示单位 dBm/dBmV/dBuV/V/W
+        default: null
+      - name: action
+        type: string
+        description: store=存储当前轨迹, clear=清除, subtract=相减显示
+        default: null
+      - name: scale
+        type: string
+        description: 垂直量程，如 "auto" 或数字(dB)
+        default: null
+      - name: reflevel
+        type: string
+        description: 参考电平，如 "auto" 或数字(dBm)
+        default: null
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_trace
+
+  - name: tinysa_hop
+    description: 多点定点测量（Ultra）：从 start_hz 到 stop_hz 按步进或点数逐频点测电平，适合定点列表测量
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: start_hz
+        type: number
+        description: 起始频率(Hz)
+        default: 100000000
+      - name: stop_hz
+        type: number
+        description: 停止频率(Hz)
+        default: 500000000
+      - name: step_hz
+        type: number
+        description: 可选，步进频率(Hz)，与 points 二选一
+        default: null
+      - name: points
+        type: integer
+        description: 可选，测量点数（与 step_hz 二选一）
+        default: null
+      - name: csv_path
+        type: string
+        description: 可选，将数据保存为 CSV 文件
+        default: ""
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_hop
+
+  - name: tinysa_vbat
+    description: 读取电池电压
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_vbat
+
+  - name: tinysa_caloutput
+    description: 校准信号输出（off 或 30/15/10/4/3/2/1 MHz）
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: frequency_mhz
+        type: string
+        description: "off=关闭 或 校准频率 MHz: 30/15/10/4/3/2/1"
+        default: "off"
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_caloutput
+
+  - name: tinysa_leveloffset
+    description: 读取电平校准数据表，或设置某一校准项的偏移误差（dB）
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: band
+        type: string
+        description: "校准项（不填则读取全表），如 low/high/switch/lna 等"
+        default: null
+      - name: error_dbm
+        type: number
+        description: 偏移误差(dB)，与 band 一起提供时为写入
+        default: null
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_leveloffset
+
+  - name: tinysa_correction
+    description: "读取或设置频率-电平校正表（表名: low/lna/ultra/ultra_lna/direct/direct_lna/harm/harm_lna/out/out_direct/out_adf/out_ultra）"
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: table_name
+        type: string
+        description: 校正表名（不填则显示用法说明）
+        default: null
+      - name: index
+        type: integer
+        description: 校正点序号 0~19（配合 table_name+frequency_hz+level_dbm 写入）
+        default: null
+      - name: frequency_hz
+        type: number
+        description: 校正点频率(Hz)
+        default: null
+      - name: level_dbm
+        type: number
+        description: 校正值(dB)
+        default: null
+    handler: instrument_mcp.commands.tinysa_handler:tinysa_correction
+
   - name: tinysa_raw_command
     description: 直接发送任意 tinySA 串口命令并返回响应（用于探索新功能）
     annotations:
