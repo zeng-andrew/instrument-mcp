@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   确为程式运行，否则明确报 FAIL。
 
 ### Changed
+- CH340 error 31 规避从「修改 `.venv` 的 `serialwin32.py` + 运行补丁脚本」
+  改为 `SerialModbusInstrument` 导入时运行时 monkeypatch（`_patch_ch340_error31()`）。
+  修复随代码走，重建虚拟环境后无需任何额外操作，不再依赖 venv 文件补丁。
+  实测 SetCommState 原样写回 10/10 次持续误报 error 31（端口实际可用），
+  故靠 open() 重试无法自愈，必须在 pyserial 配置阶段忽略该错误。
+- `open()` 移除冗余的 baud-kick（4800/2400 唤醒）：该逻辑原本为 error31
+  设计，现 error31 已由运行时补丁在上游解决，首次打开即成功，baud-kick
+  沦为永不触发的死代码（实测有无 baud-kick 成功率/耗时无差异）。重试次数
+  从 6 次减为 3 次，仅保留对端口被占用等其他打开失败的退避。
 - SerialModbusInstrument 接收路径改为后台线程 + 环形缓冲区：驱动层 RX 缓冲
   持续腾空，transact 按「站号+功能码+CRC」滑窗取帧，帧前噪声丢弃并记日志、
   帧后多余数据保留，避免残余字节导致帧错位与 CH340 断连

@@ -106,6 +106,55 @@ class _RingBuffer:
         self._size -= n
 
 
+def _patch_ch340_error31() -> None:
+    """运行时规避 CH340 USB-转串口驱动的虚假 error 31。
+
+    CH340 驱动对 SetCommState 误报 ERROR_GEN_FAILURE(31)——即使把
+    GetCommState 读出的 DCB 原样写回也持续失败（实测 10/10 次），但串口
+    实际收发完全正常。pyserial 原版在 _reconfigure_port() 中对此直接
+    raise SerialException，把好端口误判为配置失败、中断连接。
+
+    本函数在导入时（Windows 平台）把 pyserial 的 _reconfigure_port 包一层：
+    SetCommState 失败且错误码为 31 时忽略（仅记 debug 日志），其余异常照常
+    抛出。幂等——多次调用只 patch 一次。修复随本模块代码走，重建虚拟环境
+    后无需任何额外操作（不再依赖改 .venv 的 serialwin32.py 文件）。
+
+    详见 docs/CH340_error31_fix.md。
+    """
+    import sys
+    if sys.platform != "win32":
+        return
+    try:
+        import serial.serialwin32 as _sw
+        from serial.serialutil import SerialException
+    except ImportError:
+        return  # 非 Windows 后端（如 posix），无 serialwin32
+    if getattr(_sw, "_ch340_err31_patched", False):
+        return
+    _orig_reconfigure = _sw.Serial._reconfigure_port
+
+    def _reconfigure_ignoring_ch340_err31(self):
+        try:
+            _orig_reconfigure(self)
+        except SerialException as e:
+            # CH340 误报 error 31 时消息形如
+            # "...Original message: OSError(31, '资源数据不足', None, 31)"
+            if "31" in str(e):
+                logger.debug(
+                    "忽略 CH340 SetCommState 误报 error 31（端口实际可用）: %s", e
+                )
+                return
+            raise
+
+    _sw.Serial._reconfigure_port = _reconfigure_ignoring_ch340_err31
+    _sw._ch340_err31_patched = True
+    logger.debug("已应用 CH340 error31 运行时补丁（pyserial _reconfigure_port）")
+
+
+# 导入本模块即自动规避 CH340 error31（仅 Windows 生效，幂等）
+_patch_ch340_error31()
+
+
 class SerialModbusInstrument:
     """基于 pyserial 的 Modbus-RTU 串口仪器（如 MODBUS-1 协议的恒温恒湿箱）。
 
@@ -118,8 +167,11 @@ class SerialModbusInstrument:
     下次事务。驱动层 RX 缓冲始终被腾空，残余/迟到数据不会造成
     帧错位或端口卡死。
 
-    说明: 本机 CH340 经常报 ERROR_GEN_FAILURE(31)，需先用其它波特率
-    "唤醒"端口再以目标波特率打开，open() 内置了该重试逻辑。
+    CH340 error 31: 本机 CH340 USB-转串口驱动对 SetCommState 持续误报
+    ERROR_GEN_FAILURE(31)（端口实际可用）。导入本模块时已通过
+    _patch_ch340_error31() 运行时 patch pyserial 自动规避，无需手动改
+    .venv。open() 另内置少量重试，应对端口被占用等其他打开失败（驱动
+    卡死无法靠重试恢复，须 restart_ch340.bat 重启设备）。
     """
 
     def __init__(self, address: str = "COM30", baud_rate: int = 9600,
@@ -136,8 +188,12 @@ class SerialModbusInstrument:
 
     def open(self) -> None:
         import serial
+        # CH340 的 SetCommState 持续误报 error 31 已由 _patch_ch340_error31()
+        # 在 pyserial 配置阶段解决，正常情况首次打开即成功。此处重试仅作
+        # 为对端口被占用 / 物理断开等其他打开失败的退避（驱动卡死无法靠
+        # 重试恢复，须 restart_ch340.bat 重启设备）。
         last = None
-        for _ in range(6):
+        for _ in range(3):
             try:
                 self._ser = serial.Serial(
                     self.address, self.baud_rate, bytesize=8,
@@ -155,11 +211,6 @@ class SerialModbusInstrument:
                 return
             except Exception as e:
                 last = e
-                for kick in (4800, 2400):
-                    try:
-                        serial.Serial(self.address, kick, timeout=0.2).close()
-                    except Exception:
-                        pass
                 time.sleep(0.5)
         raise RuntimeError(f"无法打开 {self.address}: {last}")
 

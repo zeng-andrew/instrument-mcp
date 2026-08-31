@@ -159,3 +159,16 @@ Install NI-VISA or Keysight IO Libraries Suite for VISA backend.
 - Use `debug_last_error` tool to read instrument error queue
 - Check parameter types (numbers vs strings)
 - Verify instrument is in correct mode for command
+
+### CH340 serial: SerialException error 31 on open/reconfigure
+
+CH340 USB-serial drivers spuriously fail `SetCommState` with error 31
+(ERROR_GEN_FAILURE) — tested 10/10 times even when writing back the DCB
+unchanged — yet the port works fine; stock pyserial raises
+`SerialException` and kills the connection. The workaround is built into
+`SerialModbusInstrument` (`_patch_ch340_error31()` in `instruments.py`):
+on import it wraps pyserial's `_reconfigure_port` to ignore error 31. The
+fix ships with the code — **no `.venv` patching needed, nothing to
+re-apply after a venv rebuild**. (A stuck driver that also hangs on
+`WriteFile` is a different problem — use `restart_ch340.bat`.)
+Full write-up (Chinese): `docs/CH340_error31_fix.md`.
