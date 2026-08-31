@@ -9,5 +9,8 @@ __pycache__/
 # ZCode agent working directory
 .zcode/
 
+# 米家插座本地凭据（明文存放，勿提交；模板见 mi_plug_config.example.json）
+mi_plug_config.json
+
 # Experimental CH340 error31 fix notes (fix is baked into instruments.py)
 docs/CH340_error31_fix.md

@@ -87,6 +87,42 @@ bytes are LSB-first (docs say MSB); dBm = raw/32 - 174 (Ultra); capture is
 COM port is STM32 USB CDC so baud rate is cosmetic; enlarge pyserial RX buffer
 (`set_buffer_size`) to avoid overflow. Full notes: `docs/tinysa_zs407.md`.
 
+## Xiaomi smart plug (chuangmi.plug.212a01)
+
+米家智能插座2 — LAN control via miIO protocol (UDP, token-encrypted), no Xiaomi
+cloud needed (cloud blocking on this network does not affect it). Token verified
+2026-08-31: switch on/off, 11-property read all work. Not part of the MCP server
+(yet) — use the standalone CLI (python-miio injected ephemerally, .venv untouched):
+
+```bash
+uv run --with python-miio mi_plug.py info|status|on|off|toggle
+uv run --with python-miio mi_plug.py loop <on_s> <off_s>|loopstop|loopinfo
+uv run --with python-miio mi_plug.py get|set <siid> <piid> [value]
+```
+
+Switch is `siid=2, piid=1` (bool); power metering lives in siid=5 (electric
+power unit 0.01 W; voltage in V; current likely 0.01 A). Device-side
+scheduling: cyclic loop task (siid=4: on/off durations + enable) verified —
+runs on the plug itself, starts in the phase matching the current switch
+state, disable freezes the current state; one-shot countdown (4/3) is NOT
+locally triggerable — spec declares no action for siid=4, double-pressing the
+button is inert on this unit, and the Mi Home app countdown was measured to
+keep 4/3/4/5 untouched and fire ~1min later as a plain switch command.
+Official Xiaomi IoT docs confirm the model: cloud timer/countdown is a server
+scene that sends a `set_properties` RPC (same siid/piid we write) at expiry,
+while local timing must be vendor-built — chuangmi's siid=4 loop task is
+exactly that local timer. Approximate one-shots with `loop N 86500` /
+`loop 86500 N` or host-side `sleep` + on/off.
+Gotchas: creds live in gitignored `mi_plug_config.json` (committed template
+`mi_plug_config.example.json`); to (re)extract a token use
+Xiaomi-cloud-tokens-extractor — on this corp network its cloud login needs a
+phone hotspot (TLS to account.xiaomi.com is reset) and QR login avoids email
+2FA (full notes in the doc); `miiocli` crashes on Python 3.13 — use the
+Python API / this script;
+the "no mapping defined" warning each run is harmless; token survives
+reboots but not factory reset / re-binding; IP is DHCP (`--ip` to override).
+Full notes + property table: `docs/miplug_chuangmi_212a01.md`.
+
 ## Testing
 
 ### Manual testing with MCP inspector

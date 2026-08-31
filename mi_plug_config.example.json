@@ -1,0 +1,8 @@
+{
+  "name": "米家智能插座2（设备名称，仅备注）",
+  "model": "chuangmi.plug.212a01",
+  "did": 0,
+  "mac": "AA:BB:CC:DD:EE:FF",
+  "ip": "10.0.0.123",
+  "token": "在此粘贴32位token（米家token提取工具获取，见docs/miplug_chuangmi_212a01.md）"
+}
