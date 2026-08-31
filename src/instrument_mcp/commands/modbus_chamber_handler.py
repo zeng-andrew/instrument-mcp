@@ -5,8 +5,11 @@
   0x0002  工作温度设定（只读, 运行时随斜率爬坡变化, 勿写）
   0x0005  湿度 PV（只读, ×10）
   0x0007  输出量 MV（只读, ×10）
-  0x000A  运行标志（只读, 0=停止 2=运行）
-  0x0065  运行控制（读写）- 写 1=定值运行, 写 4=停止（写 2=程式运行不被接受）
+  0x000A  运行标志（只读, 0=停止 1=定值运行 2=程式运行）
+  0x0065  运行控制（读写）- 写 1=按当前模式启动, 写 4=停止
+          （本控制器程式与定值均写 1，实际进入哪种模式由 reg0x0068 决定）
+  0x0068  面板模式（读写, reg104）- 0=程式模式, 1=定值模式
+          （停止时写入面板同步切换；COM43 实测 2026-08 双向验证）
   0x0066  温度 SV（读写, ×100, 有符号）- 定值模式设定温度
   0x0067  湿度 SV（读写, ×10）
 
@@ -57,10 +60,19 @@ REG_RUN_FLAG = 0x000A
 REG_RUN_CTRL = 0x0065
 REG_T_SV = 0x0066
 REG_H_SV = 0x0067
+REG_MODE_CTRL = 0x0068  # 104 面板模式: 0=程式 1=定值（停止时可写, 面板同步）
 
-RUN_FIX = 1   # 写 0x0065: 定值运行
+RUN_FLAG_STOP = 0    # reg0x000A: 停止
+RUN_FLAG_CONST = 1   # reg0x000A: 定值运行
+RUN_FLAG_PROG = 2    # reg0x000A: 程式运行
+MODE_PROG = 0        # reg0x0068: 程式模式
+MODE_CONST = 1       # reg0x0068: 定值模式
+
+RUN_FIX = 1   # 写 0x0065: 启动（按 reg0x0068 当前模式）
 RUN_STOP = 4  # 写 0x0065: 停止
-RUN_PROG = 2  # 写 0x0065: 程式运行（程序控制模式）
+# 注: 早期文档称"写 2=程式运行"，实测本控制器不接受写 2；程式运行靠
+# 先写 0x0068 切程式模式、写 0x0064 选程式号、再写 1。保留 RUN_PROG 仅为兼容旧引用。
+RUN_PROG = 2  # （历史保留，本控制器不使用此值启动程式）
 
 # ── 程式（程序控制）寄存器（实物验证 COM30, 2026-08，面板对照确认） ──
 # 注意：本机寄存器布局与伟硕手册完全不同。
@@ -187,7 +199,11 @@ def handler_read_status(inst) -> str:
     h_pv = inst.read_holding(REG_H_PV, 1)[0] / 10.0
     h_sv = inst.read_holding(REG_H_SV, 1)[0] / 10.0
     mv = inst.read_holding(REG_MV, 1)[0] / 10.0
-    running = inst.read_holding(REG_RUN_FLAG, 1)[0] == 1
+    # reg10: 0=停止 1=定值运行 2=程式运行（COM43 实测 2026-08）
+    flag = inst.read_holding(REG_RUN_FLAG, 1)[0]
+    panel_mode = inst.read_holding(REG_MODE_CTRL, 1)[0]
+    run_state = {RUN_FLAG_STOP: "停止", RUN_FLAG_CONST: "定值运行",
+                 RUN_FLAG_PROG: "程式运行"}.get(flag, f"未知({flag})")
     return json.dumps({
         "pv_c": pv,
         "sv_c": sv,
@@ -195,21 +211,57 @@ def handler_read_status(inst) -> str:
         "humidity_pv_rh": h_pv,
         "humidity_sv_rh": h_sv,
         "output_pct": mv,
-        "running": running,
+        "running": flag != RUN_FLAG_STOP,
+        "run_flag": flag,
+        "run_state": run_state,
+        "panel_mode": "程式" if panel_mode == MODE_PROG else "定值",
     }, ensure_ascii=False)
 
 
 def handler_run(inst) -> str:
-    """定值模式启动运行（写 0x0065=1），读回运行标志验证。"""
+    """定值运行启动：先写 0x0068=1 确保定值模式，再写 0x0065=1。
+
+    reg10 验证期望 1（定值运行）。若不切模式直接写 1，面板原在程式模式时
+    会变成程式运行，故必须先切模式。
+    """
     import time
     _check_inst(inst)
+    inst.write_register(REG_MODE_CTRL, MODE_CONST)
+    time.sleep(0.3)
     inst.write_register(REG_RUN_CTRL, RUN_FIX)
-    time.sleep(0.5)
-    running = inst.read_holding(REG_RUN_FLAG, 1)[0] == 1
+    time.sleep(0.8)
+    flag = inst.read_holding(REG_RUN_FLAG, 1)[0]
     sv = _signed(inst.read_holding(REG_T_SV, 1)[0]) / 100.0
-    if running:
+    if flag == RUN_FLAG_CONST:
         return f"[PASS] 温箱已启动（定值运行），当前 SV={sv:.2f} °C"
-    return f"[FAIL] 启动命令已发送但运行标志未置位，请检查面板状态（SV={sv:.2f} °C）"
+    if flag == RUN_FLAG_PROG:
+        return f"[FAIL] 模式切换未生效，实际进入程式运行（reg10=2），请检查面板后重试"
+    return f"[FAIL] 启动命令已发送但运行标志未置位（reg10={flag}），请检查面板（SV={sv:.2f} °C）"
+
+
+def handler_set_mode(inst, mode: str = "prog") -> str:
+    """切换面板模式（写 0x0068）：'prog'=程式模式(0) / 'const'=定值模式(1)。
+
+    仅停止状态可切换（运行中拒绝）；写入后面板立即同步（COM43 实测 2026-08）。
+    """
+    import time
+    _check_inst(inst)
+    m = str(mode).strip().lower()
+    if m in ("prog", "program", "程式", "程序", "0"):
+        val, name = MODE_PROG, "程式"
+    elif m in ("const", "fix", "定值", "1"):
+        val, name = MODE_CONST, "定值"
+    else:
+        return f"[FAIL] mode 须为 'prog'（程式）或 'const'（定值），收到 {mode!r}"
+    flag = inst.read_holding(REG_RUN_FLAG, 1)[0]
+    if flag != RUN_FLAG_STOP:
+        return f"[FAIL] 运行中禁止切换模式（reg10={flag}），请先 mc_stop 停止"
+    inst.write_register(REG_MODE_CTRL, val)
+    time.sleep(0.3)
+    back = inst.read_holding(REG_MODE_CTRL, 1)[0]
+    if back == val:
+        return f"[PASS] 已切换到{name}模式 (reg104={back})"
+    return f"[FAIL] 模式写入未生效（读回={back}），请在面板上核对当前模式"
 
 
 def handler_stop(inst) -> str:
@@ -218,7 +270,7 @@ def handler_stop(inst) -> str:
     _check_inst(inst)
     inst.write_register(REG_RUN_CTRL, RUN_STOP)
     time.sleep(0.5)
-    running = inst.read_holding(REG_RUN_FLAG, 1)[0] == 1
+    running = inst.read_holding(REG_RUN_FLAG, 1)[0] != 0
     if not running:
         return "[PASS] 温箱已停止"
     return "[FAIL] 停止命令已发送但运行标志仍为运行，请检查面板状态"
@@ -241,8 +293,9 @@ def handler_stop(inst) -> str:
 #   0x0024(36)  当前段温度SV2（×100，有符号）
 #   0x0025(37)  当前段湿度SV（×10，0=OFF）
 #   0x0027(39)  当前段时间-小时
-#   0x000A(10)  运行标志（0=停止 2=运行）
-#   0x0065(101) 运行控制（写 1=定值 4=停止; 写2=程式运行不被接受）
+#   0x000A(10)  运行标志（0=停止 1=定值运行 2=程式运行）
+#   0x0065(101) 运行控制（写 1=按当前模式启动, 4=停止; 程式运行须先写0x0068=0、0x0064选号）
+#   0x0068(104) 面板模式（0=程式 1=定值; 停止时可写, 面板同步切换）
 #
 # 段表寄存器（分块存储，每块 100 段，写 0x0064 选程式号后可读写）:
 #   0x0515(1301) 温度块（×100，有符号; 空段=0xB1E0 即 -20000）
@@ -280,9 +333,10 @@ def handler_prog_status(inst) -> str:
     rmn_min = rt[3]
     prog_cycle = rt[7]
     seg = inst.read_holding(REG_SEG_TEMP_SV1, 5)  # reg35..39
-    mode_str = "运行中" if flag != 0 else "停止"
+    mode_str = {RUN_FLAG_STOP: "停止", RUN_FLAG_CONST: "定值运行",
+                RUN_FLAG_PROG: "程式运行"}.get(flag, f"未知({flag})")
     return json.dumps({
-        "running": flag != 0,
+        "running": flag != RUN_FLAG_STOP,
         "run_flag": flag,
         "mode": mode_str,
         "current_prog_no": cur_prog,
@@ -457,26 +511,33 @@ def handler_prog_clear(inst, prog_no: int = 1, max_seg: int = 20) -> str:
 
 
 def handler_prog_run(inst, prog_no: int = 1) -> str:
-    """启动程式运行：写 0x0064 选定程式号，再写 0x0065=1 启动。
+    """启动程式运行：写 0x0068=0 切程式模式 → 写 0x0064 选程式号 → 写 0x0065=1。
 
-    实测（COM30）：本控制器程式运行与定值运行均写 0x0065=1，区别在于
-    是否先通过 0x0064 选定了程式号。选定程式号后写 1 即启动该程式。
+    实测（COM43, 2026-08）: 0x0065=1 按 reg0x0068 当前模式启动，面板停在
+    定值模式时会静默变成定值运行（reg10=1）。完整三步后 reg10=2 才是程式运行，
+    以此验证并明确报错。
     """
     import time
     _check_inst(inst)
     prog_no = int(prog_no)
+    # 切程式模式（面板若在定值模式，只写 0x0064+0x0065=1 会变成定值运行）
+    inst.write_register(REG_MODE_CTRL, MODE_PROG)
+    time.sleep(0.3)
     # 选定程式号
     inst.write_register(REG_PROG_SEL, prog_no)
     time.sleep(0.3)
     # 写 0x0065=1 启动运行
     inst.write_register(REG_RUN_CTRL, RUN_FIX)
     time.sleep(1.0)
-    # 读回验证
+    # 读回验证: reg10=2 才是程式运行
     flag = inst.read_holding(REG_RUN_FLAG, 1)[0]
     cur_prog = inst.read_holding(REG_PROG_NO, 1)[0]
     cur_seg = inst.read_holding(REG_SEG_NO, 1)[0]
-    if flag != 0:
+    if flag == RUN_FLAG_PROG:
         return (f"[PASS] 程式{prog_no} 已启动运行 "
                 f"(运行标志={flag} 当前程式={cur_prog} 段={cur_seg})")
-    return (f"[FAIL] 程式{prog_no} 启动未成功 "
-            f"(运行标志={flag})，请检查面板：程式{prog_no} 是否已配置段表")
+    if flag == RUN_FLAG_CONST:
+        return ("[FAIL] 启动的是定值运行（reg10=1），模式切换未生效；"
+                "请检查面板后重试")
+    return (f"[FAIL] 程式{prog_no} 启动未成功（运行标志={flag}），"
+            f"请检查面板：程式{prog_no} 是否已配置段表")

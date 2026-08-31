@@ -8,11 +8,12 @@ description: Modbus-RTU 恒温恒湿试验箱（MODBUS-1 协议, RS-232C, 9600 8
 #   0x0001  温度 PV（只读, ×100, 有符号）
 #   0x0005  湿度 PV（只读, ×10）
 #   0x0007  输出量 MV（只读, ×10）
-#   0x000A  运行标志（只读, 0=停止 2=运行）
-#   0x0064  程式号选择（写=切换段表到该程式; 停止=5, 运行=程式号）
-#   0x0065  运行控制（写 1=定值/程式运行, 写 4=停止; 程式运行=先写0x0064选程式号再写1）
+#   0x000A  运行标志（只读, 0=停止 1=定值运行 2=程式运行）
+#   0x0064  程式号选择（写=切换段表到该程式; 读回=当前选中程式号）
+#   0x0065  运行控制（写 1=按当前模式启动, 写 4=停止）
 #   0x0066  温度 SV（读写, ×100, 有符号）
 #   0x0067  湿度 SV（读写, ×10）
+#   0x0068  面板模式（读写, reg104: 0=程式 1=定值; 停止时可写, 面板同步切换）
 #   0x0002  工作温度设定（只读, 勿写）
 #
 # 运行态寄存器: reg25=当前程式号 reg26=当前段号 reg27/28=剩余时/分
@@ -107,7 +108,7 @@ commands:
     handler: "instrument_mcp.commands.modbus_chamber_handler.handler_set_humidity_sv"
 
   - name: mc_run
-    description: "启动温箱定值运行（写运行控制寄存器），温箱开始向 SV 升/降温"
+    description: "启动温箱定值运行：先写0x0068=1切定值模式，再写0x0065=1，以reg10=1验证"
     annotations:
       destructiveHint: true
     params: []
@@ -120,6 +121,17 @@ commands:
     params: []
     handler: "instrument_mcp.commands.modbus_chamber_handler.handler_stop"
 
+  - name: mc_set_mode
+    description: "切换面板模式（写0x0068）：mode='prog'程式模式 / 'const'定值模式。仅停止状态可切换"
+    annotations:
+      destructiveHint: true
+    params:
+      - name: mode
+        type: string
+        description: 目标模式：'prog'（程式）或 'const'（定值）
+        default: prog
+    handler: "instrument_mcp.commands.modbus_chamber_handler.handler_set_mode"
+
   # ═══════════════════════════════════════════════
   # 程式（程序控制）命令
   # 读取/编辑程式段表、读取运行状态。
@@ -128,7 +140,10 @@ commands:
   #   reg1301 温度(×100)  reg1401 湿度(×10,0=OFF)  reg1501 时间(×100,小时)
   #   reg1601-1901 时序信号TS1-TS4
   #
-  # ⚠ 程式启动(写0x0065=2)不被接受，须在面板启动。
+  # ⚠ 程式启动（COM43 实测 2026-08）: 写0x0068=0切程式模式 + 写0x0064选程式号
+  #   + 写0x0065=1（1=按reg0x0068当前模式启动，定值/程式同值）。
+  #   面板停在定值模式时缺第一步会静默变成定值运行（reg10=1 而非 2）。
+  #   本控制器不接受写0x0065=2；段表须已配置（段数寄存器reg41只读，无法Modbus新增段）。
   # ═══════════════════════════════════════════════
 
   - name: mc_prog_status
@@ -169,7 +184,7 @@ commands:
     handler: "instrument_mcp.commands.modbus_chamber_handler.handler_prog_read_table"
 
   - name: mc_prog_run
-    description: "启动程式运行：写0x0064选程式号，再写0x0065=1启动。程式段表须已配置"
+    description: "启动程式运行：写0x0068=0切程式模式→写0x0064选程式号→写0x0065=1，以reg10=2验证。段表须已配置"
     annotations:
       destructiveHint: true
     params:

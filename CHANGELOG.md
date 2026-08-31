@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `mc_run` / `mc_stop` / `mc_read_status` 运行标志判断 `== 1` 改为 `!= 0`
+  （实物验证 reg0x000A 停止=0、运行≠0）。
+  修复前 `mc_run` 即使启动成功也报 `[FAIL]`、`mc_read_status` 运行中报
+  `running=false`。
+- 纠正寄存器映射注释中关于"写 0x0065=2 启动程式"的错误表述：本控制器
+  程式与定值运行均写 1，区别在于是否先写 0x0064 选定程式号。
+- 修正运行标志结论（COM43 差分扫描实测 2026-08）：reg0x000A 实为
+  0=停止 1=定值运行 2=程式运行（此前误记"定值/程式运行均为 2 无区别"），
+  `mc_read_status` / `mc_prog_status` 据此输出 run_state 区分运行态。
+- 修复 `mc_prog_run` 在面板处于定值模式时静默变成定值运行且误报 PASS
+  的问题：启动前先写 reg0x0068=0 切程式模式，启动后以 reg10=2 验证
+  确为程式运行，否则明确报 FAIL。
+
 ### Changed
 - SerialModbusInstrument 接收路径改为后台线程 + 环形缓冲区：驱动层 RX 缓冲
   持续腾空，transact 按「站号+功能码+CRC」滑窗取帧，帧前噪声丢弃并记日志、
@@ -18,6 +32,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run_program）+ FC=16 协议支持 + 单元测试 16 项全部通过
 
 ### Added
+- 温箱面板模式远程控制（COM43 寄存器差分扫描发现并实测验证 2026-08）：
+  reg0x0068(104)=面板模式寄存器（0=程式 1=定值），停止时可写、写入后
+  面板立即同步切换（双向面板核对验证）。
+  - 新增 `mc_set_mode`：切换程式/定值模式（运行中拒绝切换）
+  - `mc_run` 增强为"先写 0x0068=1 切定值模式再启动"，以 reg10=1 验证
+  - `mc_prog_run` 增强为三步序列：0x0068=0 切程式模式 → 0x0064=程式号
+    → 0x0065=1 启动，以 reg10=2 验证（定值模式出发亦可靠启动程式）
+  - `mc_read_status` 新增 run_state（停止/定值运行/程式运行）与
+    panel_mode（程式/定值）字段
+  - 新增 `tests/mode_scan.py` 差分扫描工具（dump/diff/stop/start/
+    progstart/read/write，快照存 tests/dumps/），复现本次实验流程
+  - 同步到 Loom 框架（ChamberHelper）：run_program 启动序列加"写
+    reg0x0068=0 切程式模式"并以 reg10=2 验证；run 先切定值模式；
+    新增 set_mode（运行中拒绝切换）；幂等/冲突判定以程式运行标志==2
+    为准（定值运行时程式号寄存器是残留值，不可作幂等依据）；假从机
+    responder 按真固件行为建模（0x0065=1 按 0x0068 模式置位标志），
+    单元测试 35 项全部通过
 - 新增 tinySA / tinySA Ultra+（Zeeenko ZS-407，COM44 实物验证 2026-08）频谱仪支持：
   - `TinySAInstrument` 串口驱动（`instruments.py`）：文本命令 + "ch> " 提示符协议，
     scanraw 二进制解码（dBm = raw/32 - 174）、capture 480x320 RGB565 帧读取；
@@ -81,5 +112,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     均无瞬态；D1003 TRIGGER 为 TEMI880/PC-Link 协议概念，本机未实现）
   - 新增段/删除段/复制程式须在面板操作
   - 已有段的全部参数（温度/湿度/时间/循环/TS1..4）可正常读写并面板同步，
-    程式可远程启动（写0x0064选程式号+0x0065=1）
+    程式可远程启动（写0x0068=0切程式模式+0x0064选程式号+0x0065=1，
+    reg10=2 验证）
   - 工程化建议：面板建段数充足的模板程式，之后用 Modbus 远程改写段内容
