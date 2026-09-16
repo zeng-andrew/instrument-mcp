@@ -63,6 +63,21 @@ connect(address="GPIB0::5::INSTR", instrument_type="keysight_ps", alias="ps")
 
 Questionable 状态位映射依据手册 Table 8-5：bit0=OV, bit1=OCP, bit4=OT(过温), bit5=SD/OS(传感线开路), bit9=RI, bit10=UNR, bit14=MeasOvld。
 
+### 66319D 双通道与耦合（Coupling）
+
+66319D 具有主输出（output 1）与辅助输出（output 2）两路输出，通道命令用后缀 2 区分：
+`OUTP/OUTP2`、`VOLT/VOLT2`、`CURR/CURR2`、`MEAS:VOLT?/MEAS:VOLT2?`。
+注意：**不支持 `INST:NSEL` 通道选择**（报 -113 Undefined header）。
+
+两路能否独立开关取决于输出耦合状态（`INST:COUP:OUTP:STAT`）：
+- `ALL`（出厂默认）：任意 OUTP 命令同时开关两路——即"关 CH1 连累 CH2"的根因
+- `NONE`：`OUTP1`/`OUTP2` 可独立控制；未耦合时裸 `OUTP` 只作用于主输出
+
+耦合设置是易失的（`OUTP:PON:STAT?` 返回 RST 时断电重启恢复默认 ALL），持久化需三步：
+`INST:COUP:OUTP:STAT NONE` → `*SAV 0` → `OUTP:PON:STAT RCL0`（有覆盖寄存器/上电带电输出
+两个副作用需确认）。完整流程、命令速查与本机实测记录见
+`docs/agilent_66319d_coupling_off.md`，实验脚本 `tests/ps_66319d_dual_channel_test.py`。
+
 ## Modbus 温箱（恒温恒湿试验箱）
 
 Modbus-RTU 恒温恒湿试验箱，支持定值运行与程式（程序）控制。协议：9600 8N1, CRC-16/MODBUS, 站地址 1。
