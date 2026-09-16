@@ -108,8 +108,22 @@ is clamped - `scan`/`scanraw`/`hop` work above 900 MHz even without unlock.
 
 米家智能插座2 — LAN control via miIO protocol (UDP, token-encrypted), no Xiaomi
 cloud needed (cloud blocking on this network does not affect it). Token verified
-2026-08-31: switch on/off, 11-property read all work. Not part of the MCP server
-(yet) — use the standalone CLI (python-miio injected ephemerally, .venv untouched):
+2026-08-31: switch on/off, 11-property read all work. Integrated into the MCP
+server as instrument_type `mi_plug` (driver `MiPlugInstrument`, commands in
+`commands/mi_plug.yaml` + `mi_plug_handler.py`; python-miio is a main dependency):
+
+```
+connect(address="10.1.200.146", instrument_type="mi_plug", alias="plug")  # token 可选参数覆盖
+miplug_status(alias="plug")
+miplug_on(alias="plug") / miplug_off(alias="plug") / miplug_toggle(alias="plug")
+miplug_loop_start(alias="plug", params_json='{"on_s": 3600, "off_s": 3600}')
+miplug_loop_stop(alias="plug") / miplug_loop_info(alias="plug")
+miplug_get_property(alias="plug", params_json='{"siid": 2, "piid": 1}')
+miplug_set_property(alias="plug", params_json='{"siid": 3, "piid": 1, "value": "false"}')
+```
+
+A standalone CLI also remains at the repo root (python-miio injected ephemerally,
+.venv untouched):
 
 ```bash
 uv run --with python-miio mi_plug.py info|status|on|off|toggle
@@ -131,11 +145,13 @@ while local timing must be vendor-built — chuangmi's siid=4 loop task is
 exactly that local timer. Approximate one-shots with `loop N 86500` /
 `loop 86500 N` or host-side `sleep` + on/off.
 Gotchas: creds live in gitignored `mi_plug_config.json` (committed template
-`mi_plug_config.example.json`); to (re)extract a token use
-Xiaomi-cloud-tokens-extractor — on this corp network its cloud login needs a
-phone hotspot (TLS to account.xiaomi.com is reset) and QR login avoids email
-2FA (full notes in the doc); `miiocli` crashes on Python 3.13 — use the
-Python API / this script;
+`mi_plug_config.example.json`); to (re)extract a token use the built-in MCP QR
+login — `miplug_token_qr_start()` then `miplug_token_qr_finish(login_id=...,
+device_keyword="chuangmi.plug")` (`src/instrument_mcp/mi_cloud.py`). QR login is
+the simplest and most stable way: no password, no email 2FA, and it auto-writes
+`mi_plug_config.json`. On this corp network the cloud login needs a phone
+hotspot (TLS to account.xiaomi.com is reset; full notes in the doc);
+`miiocli` crashes on Python 3.13 — use the Python API / this script;
 the "no mapping defined" warning each run is harmless; token survives
 reboots but not factory reset / re-binding; IP is DHCP (`--ip` to override).
 Full notes + property table: `docs/miplug_chuangmi_212a01.md`.

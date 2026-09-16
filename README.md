@@ -38,6 +38,30 @@ Before installing, ensure you have:
 | DreamSourceLab DSLogic U3Pro16 | USB Logic Analyzer | USB (pyusb + libusb-1.0) |
 | Generic SCPI instruments | Any | VISA |
 | Modbus-RTU 恒温恒湿试验箱 | Chamber | Serial (RS-232C) |
+| 米家智能插座2 (chuangmi.plug.212a01) | Smart Plug | LAN (miIO/MIoT, UDP + token) |
+
+## 米家智能插座2（mi_plug）
+
+通过局域网 miIO/MIoT 协议控制（不经小米云端）。IP/token 默认从 cwd 下
+`mi_plug_config.json` 读取（模板 `mi_plug_config.example.json`，token 提取见
+`docs/miplug_chuangmi_212a01.md`），也可用 `connect` 的 `token` 参数覆盖。
+
+### Connection
+
+```
+connect(address="10.1.200.146", instrument_type="mi_plug", alias="plug")
+```
+
+### 命令
+
+| 命令 | 功能 |
+|------|------|
+| `miplug_info` | miIO 握手 + 设备信息（验证 token） |
+| `miplug_status` | 读取全部关键属性（开关/温度/功率/电压/电流/循环配置等） |
+| `miplug_on` / `miplug_off` / `miplug_toggle` | 开关控制（写后回读校验） |
+| `miplug_loop_start` / `miplug_loop_stop` / `miplug_loop_info` | 设备端循环定时（siid=4） |
+| `miplug_get_property` / `miplug_set_property` | 按 MIoT spec 读写任意 siid/piid 属性 |
+| `miplug_token_qr_start` / `miplug_token_qr_finish` | 扫码登录小米云端提取设备 token（最简单稳定的方式，无需连接插座；默认自动写入 `mi_plug_config.json`） |
 
 ## Keysight 66300 系列直流电源
 

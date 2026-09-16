@@ -24,11 +24,30 @@ token/IP 明文存放在仓库根目录 `mi_plug_config.json`，已被 `.gitigno
 ## 获取设备 token（一次性，实操记录）
 
 局域网直控的前提是拿到设备的 32 位 token。token 由小米云端保管，**需登录
-米家账号从云端提取**（前提：插座已在米家 App 里绑定到该账号）。以下来自
-token 提取会话的实操记录：
+米家账号从云端提取**（前提：插座已在米家 App 里绑定到该账号）。
 
-**工具**：[Xiaomi-cloud-tokens-extractor](https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor)
-（PiotrMachowski），入口 `token_extractor.py`，用 uv 跑：
+### 方式一（推荐）：MCP 扫码提取 —— 最简单稳定
+
+MCP 服务器内置扫码提取工具（`src/instrument_mcp/mi_cloud.py`），**扫码登录
+是最简单稳定的方式**：不需要账号密码、不触发邮箱 2FA，米家 App 扫码确认
+即可：
+
+```
+miplug_token_qr_start()                                  # 生成登录二维码（返回图片路径）
+# 用米家 App 扫码并在 App 内确认登录
+miplug_token_qr_finish(login_id="<start 返回的 id>")     # 列出全部设备的 IP/token
+# 设备多时用 device_keyword 过滤并自动写入配置：
+miplug_token_qr_finish(login_id="...", device_keyword="chuangmi.plug")
+```
+
+`save_config=True`（默认）会把匹配设备的 IP/token 自动写入
+`mi_plug_config.json`。二维码图片存为 cwd 下 `mi_cloud_login_qr.png`。
+
+### 方式二：外部工具 Xiaomi-cloud-tokens-extractor
+
+[外部工具](https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor)
+（PiotrMachowski，入口 `token_extractor.py`，不在本仓库内，需临时 clone）的
+实操记录：
 
 ```bash
 uv add -r requirements.txt            # requests / pycryptodome / colorama 等
@@ -85,7 +104,7 @@ uv run token_extractor.py -o output.json                   # 结果另存 JSON
 | 3 | 1 | 指示灯开关 | bool | R/(w) | True（写可关夜间指示灯，未实测） |
 | 5 | 6 | 电功率 | uint32，**0.01 W** | R | 0 W（空载） |
 | 5 | 3 | 电压 | uint16 | R | 220 → 单位就是 V |
-| 5 | 2 | 电流 | uint16 | R | 疑似 0.01 A（11.85 W/220 V≈0.054 A ↔ raw 5；空载时也读 5，或为底噪） |
+| 5 | 2 | 电流 | uint16 | R | 0.01 A/LSB，**底噪 ~5 LSB（0.05 A）已证实**：继电器断开功率已归零后仍读 5；≤0.1 A 负载下不可用（见采样能力一节） |
 | 5 | 1 | 累计耗电量 | uint32 | R | raw 100，spec 未标单位（常见 0.001 kWh），待标定 |
 | 5 | 7 | 过功率阈值 | uint32 | R | 2500 → 2500 W，即额定值 |
 | 7 | 1 | 功率保护开关 | bool | R/(w) | True |
@@ -100,6 +119,24 @@ uv run token_extractor.py -o output.json                   # 结果另存 JSON
 | 8 | — | 过功率保护推送 | — | 仅 notify | — |
 
 ## 用法
+
+### 方式一：MCP 服务器（instrument-mcp）
+
+插座已作为 `instrument_type: mi_plug` 接入 MCP（驱动 `MiPlugInstrument`，
+命令定义 `src/instrument_mcp/commands/mi_plug.yaml`）。IP/token 默认读 cwd 下
+`mi_plug_config.json`，也可用 `connect` 的 `token` 参数覆盖：
+
+```
+connect(address="10.1.200.146", instrument_type="mi_plug", alias="plug")
+miplug_status(alias="plug")
+miplug_on(alias="plug") / miplug_off(alias="plug") / miplug_toggle(alias="plug")
+miplug_loop_start(alias="plug", params_json='{"on_s": 3600, "off_s": 3600}')
+miplug_loop_stop(alias="plug") / miplug_loop_info(alias="plug")
+miplug_get_property(alias="plug", params_json='{"siid": 2, "piid": 1}')
+miplug_set_property(alias="plug", params_json='{"siid": 3, "piid": 1, "value": "false"}')
+```
+
+### 方式二：独立 CLI
 
 仓库根目录的 `mi_plug.py`（用 uv 临时注入依赖，不改 `.venv`/`uv.lock`）：
 
@@ -188,6 +225,59 @@ print(d.get_property_by(2, 1))     # 读（list[CIResult]，取 [0].value）
 绝对时刻定时（"每天 8:00 开"）属于米家云端/APP 功能，不在设备 spec 里。
 宿主机 `sleep` + `on/off` 是最干净的本地一次性定时兜底。
 
+## 电流/功率采样能力（2026-08-31 实测）
+
+测试脚本 `tests/mi_plug_sampling_test.py`（`uv run --with python-miio`，子命令
+`rtt` / `refresh` / `step`），带 ~10 W 负载实测：
+
+**1. LAN 轮询上限 ≈ 10 Hz（瓶颈是网络往返，不是属性数量）**
+
+| 项目 | 实测 |
+|---|---|
+| 单属性读 RTT（get_property_by x60） | min 73 / median 102 / p95 116 ms |
+| 批量读 RTT（get_properties 一次读 P+I+U x60） | min 80 / median 102 / p95 119 ms |
+| 连发压力（100 次批量读） | 9.6 Hz 吞吐，**0 失败** |
+| 120s 持续轮询 | 8.4 Hz 稳定，1013 样本 0 失败 |
+
+协议原生 `get_properties` 支持一次 UDP 往返读多个属性（RTT 与单读相同），
+python-miio 0.5.12 没封装，需 `d.send("get_properties", [{"did": "5-6", "siid": 5,
+"piid": 6}, ...])`——**did 是客户端自选关联 ID，必须字符串**（数字 did 报
+`need did`）。RTT 下限即本机↔插座 Wi-Fi 往返（ping 66~167 ms）。
+
+**2. 设备端电表刷新 ≈ 每 5 s 一个新值 → 有效采样率只有 ~0.2 Hz**
+
+- 120s 被动监听：功率值相邻变化间隔 median **5.02 s**（min 2.8 / p90 7.5 s），
+  电流、电压 120s 内零变化；
+- 阶跃测试（继电器 off/on x2）：功率变化时刻全部对齐 **~5 s 节拍**
+  （mod 5 ≈ 4.3±0.3 s），证实固件约每 5 s 发布一次新值；
+- 所以 >0.2 Hz 的轮询只是在复读同一个缓存值；并发多 socket 也没有意义。
+
+**3. 功率还是多秒滑动平均，不是瞬时值（阶跃响应 x2 取最差值）**
+
+| 阶跃 | 响应 |
+|---|---|
+| OFF 后功率 ≤70% 基线 | +1.7~2.2 s |
+| OFF 后功率归零 | +6.6~6.8 s |
+| ON 后功率到 ~50% | +3.8~4.5 s |
+| ON 后功率到满值 | +6.9~9.5 s |
+
+即报告值相当于对真实功率做了 ~5-10 s 窗口的平均。想做"平均功率/占空比
+监测"没问题（窗口取 ≥30 s）；**想做快沿、瞬态、波形类采样不行**。
+
+**4. 各量的分辨率与底噪**
+
+| 量 | 单位 | 实测行为 |
+|---|---|---|
+| 功率 (5,6) | 0.01 W | 名义分辨率高，但被 5 s 平滑拖累；满量程 2500 W |
+| 电流 (5,2) | 0.01 A | **底噪 ~5 LSB（0.05 A）**：P=0 时仍读 5；10 W 负载全程恒 5，≤0.1 A 负载下基本不可用 |
+| 电压 (5,3) | 1 V | 120s 恒 220，分辨率 1 V，只能看市电粗略值 |
+| 累计电量 (5,1) | 未标定 | 疑似 0.001 kWh，10 W 负载 120s 变化低于 1 LSB，本测无法分辨 |
+
+**结论**：这颗插座当"慢速功率趋势表"用——LAN 想读多快都行（≤10 Hz），
+但**新数据 ~5 s 一格、且是 ~5-10 s 平均值**；电流通道底噪 0.05 A 只适合
+≥0.1 A 量级负载。仪器级电流采样请走台架（电流钳/源表），插座只做功耗
+粗测与远程断电。
+
 ## 坑与排障
 
 - **`miiocli` 在 Python 3.13 上崩**：`TypeError: argument of type 'bool' is not
@@ -204,5 +294,8 @@ print(d.get_property_by(2, 1))     # 读（list[CIResult]，取 [0].value）
 - [x] 双击物理按键已实测（2026-08-31，0.7s 分辨率监听 240s）：无任何反应。
   若仍想启用该功能，下一步是在米家 App 的设备设置里找「按键/倒计时」开关后
   重测；不影响已验证的 loop 定时方案。
+- [x] 采样能力实测（2026-08-31，`tests/mi_plug_sampling_test.py`）：LAN 轮询上限
+  ~10 Hz；设备端 ~5 s 发布一个新值（有效 ~0.2 Hz）且为多秒滑动平均（阶跃归零
+  ~7 s）；电流底噪 0.05 A。详见「电流/功率采样能力」一节。
 - [ ] 若要纳入 instrument-mcp：仿照 tinysa 模式加 `MiotPlugInstrument` +
   yaml 命令（on/off/status/功率读取/循环定时）。

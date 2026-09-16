@@ -590,6 +590,119 @@ class TinySAInstrument:
         self.close()
 
 
+class MiPlugInstrument:
+    """米家智能插座2（chuangmi.plug.212a01），LAN miIO/MIoT 协议（UDP，token 加密）。
+
+    与 VisaInstrument 保持 open/close/write/query 接口兼容，使 server.connect()
+    可以统一处理。miIO 是无连接 UDP 协议，open() 仅做握手验证（info()），
+    不持有连接；close() 置空即可。
+
+    凭据解析顺序：构造函数参数 > 环境变量 MI_PLUG_CONFIG 指定的配置文件 >
+    cwd 下 mi_plug_config.json（模板 mi_plug_config.example.json）。
+    完整属性表与坑见 docs/miplug_chuangmi_212a01.md。
+    """
+
+    def __init__(self, address: str = "", token: str = "", timeout: float = 5.0):
+        cfg = self._load_config()
+        self.address = address or cfg.get("ip", "")
+        self.token = token or cfg.get("token", "")
+        self.timeout = timeout
+        if not self.address or not self.token:
+            raise RuntimeError(
+                "缺少插座 IP/token：通过 connect(address=..., token=...) 传入，"
+                "或在 cwd 放置 mi_plug_config.json（模板见 mi_plug_config.example.json，"
+                "token 提取方式见 docs/miplug_chuangmi_212a01.md）"
+            )
+        self._device: Optional[object] = None
+
+    @staticmethod
+    def _load_config() -> dict:
+        import json
+        import os
+        from pathlib import Path
+
+        path = os.environ.get("MI_PLUG_CONFIG")
+        candidates = [Path(path)] if path else []
+        candidates.append(Path(os.getcwd()) / "mi_plug_config.json")
+        for p in candidates:
+            if p.is_file():
+                try:
+                    return json.loads(p.read_text(encoding="utf-8"))
+                except Exception as e:
+                    logger.warning(f"读取 {p} 失败: {e}")
+        return {}
+
+    def open(self) -> None:
+        import warnings
+        warnings.filterwarnings("ignore", category=FutureWarning)  # miio 0.5.12 on Py3.13
+        from miio import MiotDevice
+
+        # "Neither the class nor the parameter defines the mapping"：
+        # 212a01 在 python-miio 里没有官方 mapping，只用 get/set_property_by
+        self._device = MiotDevice(self.address, self.token)
+        try:
+            self._device.info()  # miIO info 走 token 加密通道，能返回即证明 token 正确
+        except Exception as e:
+            self._device = None
+            raise RuntimeError(
+                f"米家插座握手失败（{self.address}）: {e}（检查 IP/token、是否同网段）"
+            )
+        logger.info(f"MiPlug connected: {self.address}")
+
+    def close(self) -> None:
+        self._device = None
+        logger.info(f"MiPlug disconnected: {self.address}")
+
+    def write(self, command: str) -> None:
+        raise RuntimeError("米家插座不支持文本 write，请使用 miplug_* 命令")
+
+    def query(self, command: str) -> str:
+        """模拟 SCPI *IDN?，用于 connect() 中的型号识别。"""
+        if command.strip() == "*IDN?":
+            if self._device is None:
+                raise RuntimeError("MiPlug not connected")
+            info = self._device.info()
+            raw = getattr(info, "data", {})  # 0.5.12 的 DeviceInfo 属性不全，读原始响应
+            return (
+                f"Xiaomi,{info.model},{info.firmware_version},"
+                f"{raw.get('mac', '?')}"
+            )
+        raise RuntimeError(f"米家插座不支持查询: {command}，请使用 miplug_* 命令")
+
+    @staticmethod
+    def _unwrap(res):
+        """get_property_by 返回 list[CIResult]（0.6+）或 list[dict]，统一取出 value。"""
+        item = res[0] if isinstance(res, (list, tuple)) else res
+        if isinstance(item, dict):
+            return item.get("value")
+        return getattr(item, "value", item)
+
+    def read_prop(self, siid: int, piid: int):
+        """按 MIoT spec 读属性。"""
+        if self._device is None:
+            raise RuntimeError("MiPlug not connected")
+        return self._unwrap(self._device.get_property_by(siid, piid))
+
+    def set_prop(self, siid: int, piid: int, value) -> None:
+        """按 MIoT spec 写属性。"""
+        if self._device is None:
+            raise RuntimeError("MiPlug not connected")
+        self._device.set_property_by(siid, piid, value)
+
+    def device_info(self):
+        """返回 miio DeviceInfo（open() 之后可用）。"""
+        if self._device is None:
+            raise RuntimeError("MiPlug not connected")
+        return self._device.info()
+
+    def __enter__(self):
+        self.open()
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
 # 仪器注册表：新增仪器时在此注册
 INSTRUMENT_REGISTRY = {
     "mxa": (VisaInstrument, "Keysight MXA / EXA 系列频谱仪（通用 VISA 驱动）"),
@@ -598,6 +711,7 @@ INSTRUMENT_REGISTRY = {
     "modbus_chamber": (SerialModbusInstrument, "Modbus-RTU 恒温恒湿试验箱（MODBUS-1 协议, RS-232C）"),
     "dslogic": (DSLogicInstrument, "DreamSourceLab DSLogic U3Pro16 USB 逻辑分析仪"),
     "tinysa": (TinySAInstrument, "tinySA / tinySA Ultra+（Zeeenko ZS-407）频谱仪（USB 串口协议）"),
+    "mi_plug": (MiPlugInstrument, "米家智能插座2 (chuangmi.plug.212a01)，LAN miIO/MIoT 协议"),
     "generic": (VisaInstrument, "通用 SCPI 仪器"),
 }
 

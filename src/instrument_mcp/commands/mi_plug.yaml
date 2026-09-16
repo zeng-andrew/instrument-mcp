@@ -1,0 +1,141 @@
+instrument_type: mi_plug
+description: 米家智能插座2（chuangmi.plug.212a01），LAN miIO/MIoT 协议控制
+model_keywords:
+  - "CHUANGMI.PLUG"
+commands:
+  - name: miplug_info
+    description: 米家插座 miIO 握手 + 设备信息（model/firmware/mac/ip），验证 token 是否正确
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.mi_plug_handler:miplug_info
+
+  - name: miplug_status
+    description: 读取米家插座全部关键属性（开关/温度/已工作时间/功率/电压/电流/累计耗电/循环配置等）
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.mi_plug_handler:miplug_status
+
+  - name: miplug_on
+    description: 打开米家插座（写后 0.5s 回读校验）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.mi_plug_handler:miplug_on
+
+  - name: miplug_off
+    description: 关闭米家插座（写后 0.5s 回读校验）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.mi_plug_handler:miplug_off
+
+  - name: miplug_toggle
+    description: 翻转米家插座开关状态
+    annotations:
+      destructiveHint: false
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.mi_plug_handler:miplug_toggle
+
+  - name: miplug_loop_start
+    description: 启动米家插座设备端循环定时（开 on_s / 关 off_s 轮转，设备端执行，断网也继续）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: on_s
+        type: integer
+        description: 开启相位时长（秒）
+        default: 3600
+      - name: off_s
+        type: integer
+        description: 关闭相位时长（秒）
+        default: 3600
+    handler: instrument_mcp.commands.mi_plug_handler:miplug_loop_start
+
+  - name: miplug_loop_stop
+    description: 停止米家插座设备端循环任务（保持当前开关状态）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.mi_plug_handler:miplug_loop_stop
+
+  - name: miplug_loop_info
+    description: 读取米家插座循环任务与按键倒计时配置
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+    handler: instrument_mcp.commands.mi_plug_handler:miplug_loop_info
+
+  - name: miplug_get_property
+    description: 按 MIoT spec 读米家插座任意属性（siid/piid 见 docs/miplug_chuangmi_212a01.md）
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: siid
+        type: integer
+        description: 服务 ID（2=开关服务, 3=指示灯, 4=循环/倒计时, 5=电量统计, 7=功率保护）
+        default: 2
+      - name: piid
+        type: integer
+        description: 属性 ID（如开关=1）
+        default: 1
+    handler: instrument_mcp.commands.mi_plug_handler:miplug_get_property
+
+  - name: miplug_set_property
+    description: 按 MIoT spec 写米家插座任意属性（写后回读；value 支持 true/false/数字/字符串）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: alias
+        type: string
+        description: 仪器别名
+        default: "default"
+      - name: siid
+        type: integer
+        description: 服务 ID
+        default: 2
+      - name: piid
+        type: integer
+        description: 属性 ID
+        default: 1
+      - name: value
+        type: string
+        description: 属性值，如 "true"/"false"/"3600"，按布尔/整数/浮点/字符串顺序解析
+    handler: instrument_mcp.commands.mi_plug_handler:miplug_set_property

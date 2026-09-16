@@ -15,6 +15,7 @@ Instrument MCP Server - 仪器控制 MCP 服务器
 - Keysight 66311B 直流电源 (keysight_ps)
 - DreamSourceLab DSLogic U3Pro16 USB 逻辑分析仪 (dslogic)
 - tinySA / tinySA Ultra+ 频谱仪 (tinysa，Zeeenko ZS-407 等，串口协议)
+- 米家智能插座2 (mi_plug，chuangmi.plug.212a01，LAN miIO/MIoT 协议)
 - 通用 SCPI 仪器 (generic)
 
 DSLogic 连接示例:
@@ -27,6 +28,12 @@ tinySA 连接示例:
 - tinysa_scan(alias="sa", start_hz=100000000, stop_hz=500000000, points=101)
 - tinysa_marker(alias="sa", action="peak")
 - tinysa_capture(alias="sa", output_path="screen.bmp")
+
+米家插座连接示例:
+- connect(address="10.1.200.146", instrument_type="mi_plug", alias="plug")
+  （IP/token 也可留空由 mi_plug_config.json 提供；token 可用 connect 的 token 参数覆盖）
+- miplug_status(alias="plug")
+- miplug_on(alias="plug") / miplug_off(alias="plug") / miplug_toggle(alias="plug")
 
 项目级命令扩展:
 - 运行 init_project_commands() 会在当前目录创建 .instrument_mcp/
@@ -74,18 +81,20 @@ mcp = FastMCP("InstrumentControl", lifespan=app_lifespan)
 # 通用连接 / 断开 / 会话管理
 # ─────────────────────────────────────────────
 @mcp.tool()
-def connect(address: str, instrument_type: str = "auto", alias: str = "default") -> str:
+def connect(address: str, instrument_type: str = "auto", alias: str = "default", token: str = "") -> str:
     """连接 VISA 仪器。必须先连接才能使用其他命令。
 
     使用示例:
     - 连接 MXA: connect(address="TCPIP::192.168.1.100::INSTR", alias="mxa")
     - 连接 CMW500: connect(address="TCPIP::172.22.1.3::INSTR", alias="cmw")
     - 连接电源: connect(address="GPIB0::5::INSTR", alias="ps")
+    - 连接米家插座: connect(address="10.1.200.146", instrument_type="mi_plug", alias="plug")
 
     Args:
-        address: VISA 地址，如 "TCPIP::IP::INSTR" 或 "GPIB0::5::INSTR"
-        instrument_type: 仪器类型，设为 "auto" 自动识别，或指定 "mxa"/"cmw"/"keysight_ps"
+        address: VISA 地址，如 "TCPIP::IP::INSTR" 或 "GPIB0::5::INSTR"；米家插座为设备 IP
+        instrument_type: 仪器类型，设为 "auto" 自动识别，或指定 "mxa"/"cmw"/"keysight_ps"/"mi_plug"
         alias: 会话别名，后续命令通过此别名引用仪器，如 "mxa"/"cmw"/"ps"
+        token: 可选，仅米家插座等需要凭据的设备使用；留空时从 mi_plug_config.json 读取
     """
     from instrument_mcp.instruments import VisaInstrument, INSTRUMENT_REGISTRY
 
@@ -97,7 +106,10 @@ def connect(address: str, instrument_type: str = "auto", alias: str = "default")
         inst_cls = VisaInstrument
 
     try:
-        inst = inst_cls(address=address)
+        if token:
+            inst = inst_cls(address=address, token=token)
+        else:
+            inst = inst_cls(address=address)
         inst.open()
     except Exception as e:
         return f"[FAIL] 连接失败: {e}"
@@ -560,6 +572,124 @@ def init_project_commands() -> str:
             f"  命令目录: {custom_dir}\n"
             f"  现有文件 ({len(existing)}个): {', '.join(existing)}"
         )
+
+
+# ─────────────────────────────────────────────
+# 米家设备 token 提取（扫码登录，无需先连接设备）
+# ─────────────────────────────────────────────
+_QR_LOGINS: Dict[str, Any] = {}
+
+
+@mcp.tool()
+def miplug_token_qr_start(server: str = "cn") -> str:
+    """发起小米云端扫码登录，生成登录二维码（提取米家设备 token 的第一步）。
+
+    扫码是最简单稳定的 token 提取方式：不需要账号密码、不触发邮箱 2FA，
+    用米家 App 扫码确认即可。token 长期有效，仅恢复出厂/换绑账号后需重新提取。
+
+    流程:
+    1. 调用本工具 -> 得到二维码图片路径
+    2. 用米家 App 扫码并在 App 内确认登录
+    3. 调用 miplug_token_qr_finish(login_id=...) 完成提取
+
+    Args:
+        server: 小米云服务区域，国内账号固定为 "cn"
+    """
+    import uuid
+
+    from instrument_mcp.mi_cloud import MiCloudQRLogin
+
+    conn = MiCloudQRLogin(server=server)
+    try:
+        qr_path = conn.start()
+    except Exception as e:
+        return (
+            f"[FAIL] 无法发起扫码登录: {e}\n"
+            f"  提示: 公司网络可能拦截 account.xiaomi.com（TLS 被重置），"
+            f"请切手机热点后重试"
+        )
+
+    login_id = uuid.uuid4().hex[:8]
+    _QR_LOGINS[login_id] = conn
+    return (
+        f"[PASS] 登录二维码已生成\n"
+        f"  二维码图片: {qr_path}\n"
+        f"  备用链接（无法看图时在米家 App 内打开）: {conn.login_url}\n"
+        f"  有效期: 约 {conn.qr_timeout}s\n"
+        f"  请用米家 App 扫码并确认登录，然后调用:\n"
+        f"    miplug_token_qr_finish(login_id=\"{login_id}\")"
+    )
+
+
+@mcp.tool()
+def miplug_token_qr_finish(
+    login_id: str,
+    timeout_s: int = 120,
+    save_config: bool = True,
+    device_keyword: str = "",
+) -> str:
+    """完成扫码登录（等待米家 App 确认），列出账号下全部设备的 IP/token。
+
+    配合 miplug_token_qr_start 使用。扫码确认后返回设备清单
+    （NAME / ID / MODEL / IP / TOKEN）；save_config=True 时把匹配设备的
+    IP/token 写入 mi_plug_config.json。
+
+    Args:
+        login_id: miplug_token_qr_start 返回的登录会话 ID
+        timeout_s: 等待扫码确认的最长时间（秒）
+        save_config: 是否把设备 IP/token 写入 mi_plug_config.json
+        device_keyword: 多台设备时按名称/型号/did 过滤（子串匹配，如 "插座" 或
+            "chuangmi.plug"）；留空且仅一台设备时自动选中
+    """
+    from instrument_mcp.mi_cloud import update_config
+
+    conn = _QR_LOGINS.pop(login_id, None)
+    if conn is None:
+        return f"[FAIL] 无效的 login_id '{login_id}'（可能已用过或已过期），请重新调用 miplug_token_qr_start"
+
+    try:
+        conn.poll(timeout_s=timeout_s)
+    except Exception as e:
+        return f"[FAIL] 扫码登录未完成: {e}"
+
+    try:
+        devices = conn.list_devices()
+    except Exception as e:
+        return f"[FAIL] 登录成功但拉取设备列表失败: {e}"
+
+    lines = ["[PASS] 扫码登录成功，设备清单:"]
+    for d in devices:
+        lines.append(
+            f"  - {d.get('name', '?')} | did={d.get('did', '?')}"
+            f" | model={d.get('model', '?')} | ip={d.get('localip', '?')}"
+            f" | token={d.get('token', '?')}"
+        )
+
+    if not save_config:
+        return "\n".join(lines)
+
+    kw = device_keyword.strip().lower()
+    if kw:
+        matched = [
+            d for d in devices
+            if kw in str(d.get("name", "")).lower()
+            or kw in str(d.get("model", "")).lower()
+            or kw in str(d.get("did", "")).lower()
+        ]
+    else:
+        matched = devices if len(devices) == 1 else []
+    if len(matched) != 1:
+        lines.append(
+            f"\n[WARN] 未自动写入配置：匹配到 {len(matched)} 台设备，"
+            f"请用 device_keyword 指定（如 \"插座\" / \"chuangmi.plug\"），"
+            f"或手动把 IP/token 填进 mi_plug_config.json"
+        )
+        return "\n".join(lines)
+
+    dev = matched[0]
+    path = update_config(dev.get("localip", ""), dev.get("token", ""))
+    lines.append(f"\n[PASS] 已写入 {path}: ip={dev.get('localip')}（{dev.get('name')}）")
+    return "\n".join(lines)
 
 
 # ─────────────────────────────────────────────
