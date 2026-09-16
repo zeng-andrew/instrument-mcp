@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.2.0] - 2026-09-16
+
+_Feature release: 米家智能插座 MCP 集成_
+
+
 ### Fixed
 - `mc_run` / `mc_stop` / `mc_read_status` 运行标志判断 `== 1` 改为 `!= 0`
   （实物验证 reg0x000A 停止=0、运行≠0）。
@@ -41,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run_program）+ FC=16 协议支持 + 单元测试 16 项全部通过
 
 ### Added
+- 米家智能插座2 接入 MCP server（instrument_type `mi_plug`，LAN miIO/MIoT，
+  python-miio/requests 转为主依赖）：新增 miplug_info/status/on/off/toggle、
+  miplug_loop_start/loop_stop/loop_info（设备端循环定时）、
+  miplug_get_property/set_property（任意 siid/piid 属性读写）命令
+- 新增米家云端扫码提取 token（miplug_token_qr_start / miplug_token_qr_finish，
+  `src/instrument_mcp/mi_cloud.py`）：免密码/免邮箱 2FA，成功后自动写入
+  gitignored 的 mi_plug_config.json，适配企业网云端 TLS 被拦截的环境
 - 温箱面板模式远程控制（COM43 寄存器差分扫描发现并实测验证 2026-08）：
   reg0x0068(104)=面板模式寄存器（0=程式 1=定值），停止时可写、写入后
   面板立即同步切换（双向面板核对验证）。
@@ -128,6 +142,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AI self-learning: explore_scpi, save_learned_command tools
 - Project-level command extension via .instrument_mcp/ directory
 - MCP stdio transport support
+
+### Docs
+- 新增 docs/agilent_66319d_coupling_off.md：66319D 双通道独立供电实测与耦合
+  NONE/ALL 关闭流程（`INST:COUP:OUTP:STAT`、持久化 `*SAV 0` +
+  `OUTP:PON:STAT RCL0` 及副作用、命令速查、本机实测记录）；README 与实验
+  脚本（tests/ps_66319d_dual_channel_test.py，8/8 通过）同步
+- docs/miplug_chuangmi_212a01.md：补充 MCP 集成命令、云端 QR 取 token 流程
+  与实测属性坑位
 
 ### Known Issues
 - Requires external VISA backend (NI-VISA or Keysight IO Libraries)
