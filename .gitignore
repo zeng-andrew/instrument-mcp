@@ -14,3 +14,7 @@ mi_plug_config.json
 
 # Experimental CH340 error31 fix notes (fix is baked into instruments.py)
 docs/CH340_error31_fix.md
+
+# 实验数据与日志（临时采集产物，不入库）
+tests/*.log
+tests/*_raw.csv
