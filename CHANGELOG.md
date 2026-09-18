@@ -9,6 +9,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [0.3.0] - 2026-09-18
+
+_Feature release: CMW500 LTE 深度接入（信令 + Meas 测量/CQI 调度共 97 条工具）与 MCP 全链路打通_
+
+### Added
+- CMW500 LTE Signaling 能力扩至 84 条（2026-09-17/18 固件 3.7.110 真机逐条验证）：
+  频段/信道切换（Blind Handover/Redirection 机制实测）、连接生命周期
+  （CONNect/DISConnect/DETach 与 Event Log 映射）、专用承载预配、信号路径
+  （RF COM）路由、TPC 上行功率控制、UE 能力/频段查询、吞吐测量等
+- CMW500 参数关联 handler 三个：cmw_lte_snapshot（一键面板快照）、
+  cmw_set_dl_rb（带宽优先联动，自动规避 -203）、cmw_set_ul_rb（自动开
+  QAM 支持开关，规避 -221）
+- CMW500 LTE Meas 测量应用与 CQI 动态调度接入（cmw.yaml 共 97 条，2026-09-18 实测）：
+  - 场景路由：CSPath（信令+测量共用信号路径，master 用信令应用全名）/SALone
+  - MEValuation 状态机（INIT/STOP/STATe）、信道类型/触发源配置
+  - cmw_meas_tx_report：调制质量 29 字段（EVM/幅相误差/频偏/TX 功率/IQ 失衡）
+    + ACLR + 频谱平坦度 + 带内发射格式化报告，NAV/NCAP 占位容错
+  - cmw_meas_run_once：一键单发 UE 上行测量（实测样例：EVM RMS≈2%、
+    频偏 1.6Hz、ACLR 47~55dB）
+  - cmw_cqi_set / cmw_cqi_stats：CQI 调度切换与远程观察窗口（CQI 中位值
+    统计 + CQI→MCS 映射表）；cmw_init_ebler
+- 新增 MCP 层集成验证 `tests/cmw_mcp_integration_test.py`：经
+  FastMCP.call_tool 真实客户端路径驱动真机（注册完整性/VISA 连接/
+  Meas/CQI 工具/场景往返），首跑即发现下述三个服务器层问题
+- 冒烟回归 `tests/cmw_handler_smoke_test.py` 扩至 7 个零扰动用例，
+  `--live` 追加真实单发测量；SCPI 探针 `tests/cmw500_probe.py` 新增
+  meas/cqi 内置批次
+
+### Fixed
+- INSTRUMENT_REGISTRY 缺 cmw 条目：显式 instrument_type="cmw" 与 auto
+  识别均被拒——CMW500 从未真正通过 MCP server 连接过（集成验证发现）
+- TCPIP SOCKET 资源未设读写终止符：NI-VISA raw socket 无协议层 END，
+  viRead 即使数据已在缓冲也挂到超时；仅对 SOCKET 地址启用 `\n` 终止符，
+  不影响 VXI-11/HiSLIP 仪器
+- SCPI 模板在空 params_json 时不格式化，{placeholder} 原样发给仪器
+  （影响所有带默认参数的 YAML 命令，写入却报 [PASS]）；现一律 format
+  并合并 YAML 默认值，显式 None 回落默认值，必填参数缺失显式报错
+- cmw_meas_tx_report/run_once 增加可靠性指示器检查：实测无上行信号时
+  单发约 1s 即 RDY 输出全 INV 数据（可靠性=26），不会等触发——报告对
+  可靠性非 0 显式告警
+- 修正上轮错误记录：INST:SEL 只能选测量类应用（信令应用写 SIG 报 -200）；
+  LTE:SIGN 与 LTE:MEAS 两棵树可同时寻址、无需切应用；删除直写不合法的
+  场景路由占位命令 cmw_set_meas_port/cmw_set_sign_port
+- cmw500_probe.py 批量探测响应错位：每条指令前排空 socket 残留、
+  超时 1.5s→4s（场景切换等重写命令阻塞 2s+）
+
+### Docs
+- 新增 docs/cmw500_lte_signaling.md：LTE 信令接入手册（面板项→SCPI 速查、
+  连接生命周期、频段切换机制、参数关联规则）
+- 新增 docs/cmw500_lte_meas.md：测量应用与 CQI 调度手册（双树架构、
+  CSPath 联动流程、结果字段格式、CQI 掉链风险与"先切后连"重试流程、
+  GUI 观察流程）
+- CLAUDE.md 新增 CMW500 章节（连接方式/核心工具/已验证怪癖）
+
+### Known Issues
+- CMW500 CQI 调度：连接中（CEST）切换实测 7s 后 UL out of Sync 掉链，
+  且模组 >60min 未自主重附（对比干净 Detach 后 4.6min；小区重启也唤不醒，
+  疑深度 PSM，需人工重启模组）。推荐无连接时先配置再连接（流程见文档）
+
 ## [0.2.0] - 2026-09-16
 
 _Feature release: 米家智能插座 MCP 集成_

@@ -1,6 +1,6 @@
 [project]
 name = "instrument-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "MCP Server for instrument control (MXA/CMW500/Keysight PSU/DSLogic)"
 readme = "README.md"
 license = {text = "MIT"}
