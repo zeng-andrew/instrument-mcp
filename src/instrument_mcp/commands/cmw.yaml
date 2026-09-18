@@ -882,7 +882,7 @@ commands:
   # 触发源默认 "IF Power"；MEValuation 信道类型默认 PUSC(h)
   # ─────────────────────────────────────────────
   - name: cmw_meas_query_scenario
-    description: 查询 LTE Meas 场景路由（返回 SAL=独立 / CSP=信令+测量共用信号路径）
+    description: 查询 LTE Meas 场景路由（返回 SAL=独立 / CSP=信令+测量共用信号路径）。场景切换是异步重操作（2s+），切完用本命令读回确认生效
     annotations:
       readOnlyHint: true
     params: []
@@ -996,7 +996,8 @@ commands:
     description: >
       一键单发 UE 上行测量（关联版）：校验 CSP 场景 → INIT → 轮询到 RDY → 返回完整格式化报告。
       实测参考值（Cat.1 模组 +29dBm 顶格发射）：EVM RMS≈2%、频偏≈1.6Hz、ACLR 47~55dB。
-      ATT 空闲态无连续 PUSCH 会等不到触发而超时——先 CALL CONNect 到 CEST
+      ⚠ 无上行信号时本固件约 1s 即 RDY"完成"（不会等触发），数据全 INV 且报告带
+      ⚠ 可靠性告警——确认 UE 在 CEST 且 PUSCH 被调度后再测才是有效数据
     annotations:
       destructiveHint: false
     params:

@@ -301,13 +301,25 @@ def cmw_meas_tx_report(inst, statistic: str = "AVERage") -> str:
         ("频谱平坦度", "FETC:LTE:MEAS:MEValuation:ESFLatness", _ESF_FIELDS),
     ]
     out = [f"LTE Meas MEValuation 报告（统计档 {statistic}）:"]
+    mod_vals = None
     try:
+        mod_vals = _meas_fetch(inst, sections[0][1], statistic)
         out.append("测量状态: " + _q(inst, "FETC:LTE:MEAS:MEValuation:STATe:ALL?"))
     except Exception as e:
         out.append(f"测量状态: <查询失败: {e}>")
-    for title, path, fields in sections:
+    if mod_vals:
+        rel = mod_vals[0]
+        # 可靠性指示器 0=有效；非 0（如 26=同步失败）时全部数据字段不可信。
+        # 注意：无上行信号时单发测量约 1s 即"完成"（RDY）并给出无效数据，不会等触发
         try:
-            vals = _meas_fetch(inst, path, statistic)
+            if int(float(rel)) != 0:
+                out.append(f"⚠ 可靠性 = {rel} ≠ 0：结果无效（无上行信号/同步失败/超限），"
+                           f"请确认 UE 在 CEST 且 PUSCH 被调度后再测")
+        except ValueError:
+            pass
+    for idx, (title, path, fields) in enumerate(sections):
+        try:
+            vals = mod_vals if idx == 0 and mod_vals else _meas_fetch(inst, path, statistic)
             out.append(f"{title}:")
             out.append(_pair(fields, vals))
         except Exception as e:
@@ -327,9 +339,10 @@ def cmw_meas_tx_report(inst, statistic: str = "AVERage") -> str:
 def cmw_meas_run_once(inst, timeout_s: int = 15, statistic: str = "AVERage") -> str:
     """一键单发 UE 上行测量：INIT MEValuation → 轮询状态到 RDY → 返回格式化报告。
 
-    前提：UE 上行有信号（信令连接 CEST 且 PUSCH 被调度最理想；ATT 空闲态只能
-    抓到零星突发，可能一直等不到触发）。要求场景为 CSP（信令+测量共用路径），
-    可先用 cmw_meas_set_scenario_cspath 设置。单发完成后状态回 RDY，可反复调用。
+    前提：UE 上行有信号（信令连接 CEST 且 PUSCH 被调度最理想）。
+    要求场景为 CSP（信令+测量共用路径），可先用 cmw_meas_set_scenario_cspath 设置。
+    ⚠ 本固件实测（3.7.110）：无上行信号时测量约 1s 即 RDY"完成"，数据全 INV、
+    可靠性≠0——报告会带 ⚠ 无效告警，不会阻塞等触发；有信号时约 1s 出真实数据。
     """
     import time
 
