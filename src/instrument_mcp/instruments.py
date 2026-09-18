@@ -29,6 +29,12 @@ class VisaInstrument:
         self._rm = pyvisa.ResourceManager()
         self._resource = self._rm.open_resource(self.address)
         self._resource.timeout = self.timeout_ms  # type: ignore
+        if "SOCKET" in self.address.upper():
+            # TCPIP SOCKET 资源必须显式启用终止符，否则 viRead 等不到协议层 END
+            # 会一直挂到超时（数据早已在缓冲区）——CMW500 的 5025 socket 实测如此；
+            # VXI-11/HiSLIP 仪器（MXA 等）有原生 END 标志，不需要也不能一概设置
+            self._resource.read_termination = "\n"  # type: ignore
+            self._resource.write_termination = "\n"  # type: ignore
         logger.info(f"VISA connected: {self.address}")
 
     def close(self) -> None:
@@ -706,6 +712,7 @@ class MiPlugInstrument:
 # 仪器注册表：新增仪器时在此注册
 INSTRUMENT_REGISTRY = {
     "mxa": (VisaInstrument, "Keysight MXA / EXA 系列频谱仪（通用 VISA 驱动）"),
+    "cmw": (VisaInstrument, "R&S CMW500 无线通信测试仪（TCPIP0::<ip>::5025::SOCKET）"),
     "keysight_ps": (VisaInstrument, "Keysight 66311B 直流电源"),
     "temperature_chamber": (VisaInstrument, "环境试验箱 / 温箱（Espec / Thermotron / CSZ 等）"),
     "modbus_chamber": (SerialModbusInstrument, "Modbus-RTU 恒温恒湿试验箱（MODBUS-1 协议, RS-232C）"),
