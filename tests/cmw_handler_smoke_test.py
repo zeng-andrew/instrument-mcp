@@ -7,8 +7,13 @@
   3. cmw_set_dl_rb N50 不许自动切带宽 -> 应拒绝（带宽表 B50 不含 N50），不发生任何写入
   4. cmw_set_ul_rb N1,QPSK,T5    UL 不受带宽限制 -> 直接写入（与现值相同）
   5. cmw_set_ul_rb Q64 关闭自动开 QAM -> 应拒绝（ULSupport QAM64=OFF），不发生任何写入
+  6. cmw_meas_tx_report          LTE Meas 结果只读报告（NAV/NCAP 占位也不允许崩）
+  7. cmw_cqi_stats               CQI 统计/映射表只读报告
 
-用法: uv run python tests/cmw_handler_smoke_test.py
+加 --live 额外跑真测量（会 INIT 一次 MEValuation，对配置零改动）:
+  8. cmw_meas_run_once           要求 CSP 场景 + UE 连接（CEST）；否则打印失败原因
+
+用法: uv run python tests/cmw_handler_smoke_test.py [--live]
 """
 
 import socket
@@ -82,6 +87,29 @@ def main() -> int:
         qam = inst.query("CONF:LTE:SIGN:CELL:PCC:ULSupport:QAM64:ENABle?").strip()
         print(f"复核: QAM64 开关未被改动 = {qam}")
         failures += qam != "OFF"
+
+        print("=" * 30, "用例6: LTE Meas 只读报告", "=" * 30)
+        try:
+            print(H.cmw_meas_tx_report(inst, statistic="AVERage"))
+        except Exception as e:
+            print(f"[FAIL] cmw_meas_tx_report 抛异常: {e}")
+            failures += 1
+
+        print("=" * 30, "用例7: CQI 统计只读报告", "=" * 30)
+        try:
+            print(H.cmw_cqi_stats(inst))
+        except Exception as e:
+            print(f"[FAIL] cmw_cqi_stats 抛异常: {e}")
+            failures += 1
+
+        if "--live" in sys.argv:
+            print("=" * 30, "用例8(--live): 单发 UE 上行测量", "=" * 30)
+            try:
+                r = H.cmw_meas_run_once(inst, timeout_s=20, statistic="AVERage")
+                print(r)
+            except Exception as e:
+                print(f"[FAIL] cmw_meas_run_once 抛异常: {e}")
+                failures += 1
 
         print("=" * 30, f"结果: {'全部通过' if failures == 0 else f'{failures} 项失败'}", "=" * 30)
     finally:
