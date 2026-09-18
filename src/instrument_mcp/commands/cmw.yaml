@@ -3,6 +3,8 @@ description: R&S CMW500 宽带无线通信测试仪
 
 # 注意：CMW500 需要先通过前面板激活对应应用（LTE/WCDMA/GSM 等）
 # 部分命令需要 UE 连接后才能查询到有效数据
+# 2026-09-17 于固件 3.7.110 实测：新增"调度/RB 配置"一节（见下方说明），
+# SCPI 指令集权威参考：R&S RsCmwLteSig 驱动源码（PyPI，指令树与固件一致）
 
 model_keywords:
   - "CMW500"
@@ -107,13 +109,14 @@ commands:
   # ─────────────────────────────────────────────
   # 配置命令
   # ─────────────────────────────────────────────
-  # 频段/信道切换机制：手机处于 Connection Established 状态下，直接修改 Band 或
-  # 下行信道号即可——仪器内部自动发起 Redirection（重定向），手机保持在同一 LTE
-  # 连接内跳到新频率，无需 Handover、无需断开重连。改下行信道后上行信道自动计算。
+  # 频段/信道切换机制（2026-09-18 连接状态下实测修正）：
+  #   同频段内改 DL 信道 = Blind Handover（日志 "Blind Handover (Successful)"，约 0.5s）；
+  #   跨频段 = Redirection（日志 "Redirection Start/Successful"，含 RRC 释放重建 + TAU，约 1.6s，
+  #   且紧跟一次 Blind Handover 落到精确信道）。
+  #   两种方式连接均不断（UE 保持 CEST），上行信道自动计算（550→300 时 UL 18550→18300 实测）。
+  #   频段属于哪种双工，就必须先把 DMODe 设成对应值，否则切换报 -221 Settings conflict。
   #   FDD: OB1~OB32, OB65~OB67, OB252, OB255    TDD: OB33~OB46    自定义: UDEFined（需选件 KS525）
   #   注意: OB252/OB255 需固件 V3.5.40+; OB29/OB32/OB67/OB252/OB255 仅用于辅载波(SCC)下行
-  # 双工模式约束（已在 CMW500 固件 3.5.120 实测）：频段属于哪种双工，就必须先把 DMODe 设成对应值，
-  #   否则切换会报 -221 Settings conflict。FDD 频段→DMODe FDD；TDD 频段(OB33~OB46)→DMODe TDD。
   - name: cmw_set_duplex_mode
     description: 设置 LTE 双工模式（FDD/TDD）。切到 TDD 频段(OB33~OB46)前必须先设为 TDD，否则设频段会报 -221 冲突
     annotations:
@@ -139,7 +142,11 @@ commands:
       write: "CONFigure:LTE:SIGN:PCC:BAND {band}"
 
   - name: cmw_switch_band
-    description: 一键切换频段+下行信道（同一双工模式内，谐波测试循环首选：设 Band 再设 DL 信道，仪器自动 Redirection 跳频，上行信道自动计算。跨 FDD/TDD 需先调用 cmw_set_duplex_mode）
+    description: >
+      一键切换频段+下行信道（谐波测试循环首选）。连接中切换不断网：同频段=Blind Handover
+      (约0.5s)，跨频段=Redirection(约1.6s，日志含 RRC 重建+TAU)；上行信道自动计算。
+      跨 FDD/TDD 需先调用 cmw_set_duplex_mode。UE 支持目标频段是前提（用
+      cmw_query_ue_supported_bands 确认）
     annotations:
       destructiveHint: false
     params:
@@ -180,7 +187,7 @@ commands:
       write: "CONFigure:LTE:SIGN:RFSettings:PCC:CHANnel:UL {channel}"
 
   - name: cmw_set_bandwidth
-    description: 设置 LTE 信道带宽（RB数格式：B100=20MHz, B50=10MHz, B25=5MHz, B15=3MHz, B6=1.4MHz）
+    description: 设置 LTE 信道带宽（RB数格式：B100=20MHz, B50=10MHz, B25=5MHz, B15=3MHz, B6=1.4MHz）。注意联动：带宽决定 DL RMC 可选值（先改带宽再改 RMC:DL），且改带宽后 RMC:UL/UDCHannels 会被仪器自动钳位到合法值
     annotations:
       destructiveHint: false
     params:
@@ -190,6 +197,34 @@ commands:
         default: "B100"
     scpi_template:
       write: "CONFigure:LTE:SIGN:CELL:BANDwidth:PCC:DL {rb_count}"
+
+  - name: cmw_set_bandwidth_ul
+    description: 设置 LTE 上行信道带宽（格式同 cmw_set_bandwidth；一般与 DL 保持一致）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: rb_count
+        type: string
+        description: 资源块数量（B100, B50, B25, B15, B6）
+        default: "B100"
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:CELL:BANDwidth:PCC:UL {rb_count}"
+
+  - name: cmw_query_bandwidth
+    description: 查询当前下行信道带宽（返回 B050=10MHz, B100=20MHz 等）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:CELL:BANDwidth:PCC:DL?"
+
+  - name: cmw_query_bandwidth_ul
+    description: 查询当前上行信道带宽
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:CELL:BANDwidth:PCC:UL?"
 
   - name: cmw_set_input_attenuation
     description: 设置输入衰减
@@ -204,16 +239,34 @@ commands:
       write: "CONFigure:LTE:SIGN:RFSettings:EATTenuation:INPut {att_db}"
 
   - name: cmw_set_tpc_mode
-    description: 设置上行功率控制模式
+    description: >
+      设置上行功率控制模式（PUSCh TPC）。实测行为：MAXP=命令UE顶到最大功率（ENPower 升至约 +29）；
+      CLOop=闭环控制，UE 功率跟随 cmw_set_tpc_target_power 的目标（-20 目标实测 15s 内把 ENPower
+      从 +29 拉到 -12.9）；其余 OPEn/MINPower/SINGle(±1dB步进模式,配 TPC:PEXecute 执行)/RPControl(3GPP
+      相对功率控制图案 RUA/RDA 等)
     annotations:
       destructiveHint: false
     params:
       - name: mode
         type: string
-        description: 功率控制模式（CLOop, OPEn, MAXPower, MINPower）
+        description: 功率控制模式（CLOop, OPEn, MAXP, MINP, SINGle, RPControl）
         default: "CLOop"
     scpi_template:
       write: "CONFigure:LTE:SIGNaling:UL:PCC:PUSCh:TPC:SET {mode}"
+
+  - name: cmw_set_tpc_target_power
+    description: >
+      设置 TPC 闭环目标功率（dBm，-50~33）。UE 会在数秒内被 TPC 命令拉到目标附近；
+      观察 ENPower（cmw_query_expected_power，ULPC 自动模式下跟随 UE 实际功率）可验证
+    annotations:
+      destructiveHint: false
+    params:
+      - name: power_dbm
+        type: number
+        description: 目标功率 dBm
+        default: -20
+    scpi_template:
+      write: "CONFigure:LTE:SIGNaling:UL:PCC:PUSCh:TPC:CLTPower {power_dbm}"
 
   # ─────────────────────────────────────────────
   # 查询命令
@@ -267,10 +320,374 @@ commands:
       query: "CONFigure:LTE:SIGN:RFSettings:PCC:FREQuency:UL?"
 
   # ─────────────────────────────────────────────
+  # 调度 / RB 配置（2026-09-17 固件 3.7.110 真机实测）
+  # 对应 LTE Signaling 面板 Connection 页的 Scheduling Type + RB Downlink/Uplink。
+  #   - 调度类型: RMC | UDCHannels(用户自定义信道) | UDTTibased(逐子帧,需 KS510) | CQI | SPS | EMAMode | EMCSched
+  #     查询返回缩写: RMC / UDCH / ...
+  #   - RMC 参数格式: <RB数>,<调制>,<TBS索引>，如 N50,QPSK,T5；TBS 可写 KEEP 由仪器自动选兼容值
+  #   - ★ DL RB 改法（2026-09-17 二次实测确认）: DL RMC 可选值受 Cell Bandwidth 限制，
+  #     必须先改带宽（CELL:BANDwidth:PCC:DL）再改 RMC:DL，否则报 -203 "option missing"
+  #     （文案有误导性，并非缺选件）。B100 时仅 N50 可写；B50 时 N25 实测可写。
+  #     RMC:UL 不受此限制（N1/N25/N50 实测均可写）。
+  #     要配任意 DL RB（超出带宽 RMC 列表时），可切调度类型 UDCHannels 后写 UDCHannels:DL。
+  #   - UL 64QAM/256QAM 默认关闭（CELL:PCC:ULSupport:QAM64:ENABle=OFF），未开启时 RMC:UL 写
+  #     Q64/Q256 报 -221 Settings conflict；先用 cmw_enable_ul_qam 打开。
+  #   - 修改调度/RB 配置建议在小区 OFF 时进行（SOUR:LTE:SIGN:CELL:STATe OFF）
+  # ─────────────────────────────────────────────
+  - name: cmw_query_scheduling_type
+    description: 查询调度类型（返回 RMC/UDCH 等缩写，对应 Connection 面板 Scheduling Type）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:CONNection:PCC:STYPe?"
+
+  - name: cmw_set_scheduling_type
+    description: 设置调度类型。RMC=参考测量信道；UDCHannels=用户自定义信道（任意 RB/起始RB）；UDTTibased=逐子帧定义（需 KS510）；CQI/SPS 等
+    annotations:
+      destructiveHint: false
+    params:
+      - name: type
+        type: string
+        description: 调度类型（RMC, UDCHannels, UDTTibased, CQI, SPS）
+        default: "RMC"
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:CONNection:PCC:STYPe {type}"
+
+  - name: cmw_query_rmc_ul
+    description: 查询上行 RMC 配置（返回如 N50,QPSK,T6 = RB数/调制/TBS索引）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:CONNection:PCC:RMC:UL?"
+
+  - name: cmw_set_rmc_ul
+    description: 设置上行 RMC（RB Downlink/Uplink 面板项）。RB 枚举 N1~N100，调制 QPSK/Q16/Q64/Q256，TBS 索引 T1~T37 或 KEEP（自动选兼容值）。本机 UL 实测无 RB 限制
+    annotations:
+      destructiveHint: false
+    params:
+      - name: number_rb
+        type: string
+        description: RB 数（如 N25, N50, N100）
+        default: "N50"
+      - name: modulation
+        type: string
+        description: 调制（QPSK, Q16, Q64, Q256）
+        default: "QPSK"
+      - name: tbs_index
+        type: string
+        description: TBS 索引（T1~T37 或 KEEP）
+        default: "T6"
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:CONNection:PCC:RMC:UL {number_rb},{modulation},{tbs_index}"
+
+  - name: cmw_query_rmc_dl
+    description: 查询下行 RMC 配置（返回如 N50,QPSK,T5）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:CONNection:PCC:RMC:DL?"
+
+  - name: cmw_set_rmc_dl
+    description: 设置下行 RMC。注意：DL RMC 可选值受信道带宽限制，须先用 cmw_set_bandwidth 把带宽改到对应档位（如 N25 需 B50），否则报 -203 option missing；改带宽后 UDCHannels/UL RMC 会被仪器自动钳位
+    annotations:
+      destructiveHint: false
+    params:
+      - name: number_rb
+        type: string
+        description: RB 数（本机仅支持 N50）
+        default: "N50"
+      - name: modulation
+        type: string
+        description: 调制（QPSK, Q16, Q64, Q256）
+        default: "QPSK"
+      - name: tbs_index
+        type: string
+        description: TBS 索引（T1~T37 或 KEEP）
+        default: "T5"
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:CONNection:PCC:RMC:DL {number_rb},{modulation},{tbs_index}"
+
+  - name: cmw_query_rmc_rb_position_dl
+    description: 查询下行 RMC RB 位置（LOW/HIGH/P5/P10/P23/P35/P48）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:CONNection:PCC:RMC:RBPosition:DL?"
+
+  - name: cmw_set_rmc_rb_position_dl
+    description: 设置下行 RMC RB 位置（RB 在频域的摆放位置）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: position
+        type: string
+        description: RB 位置（LOW, HIGH, P5, P10, P23, P35, P48）
+        default: "LOW"
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:CONNection:PCC:RMC:RBPosition:DL {position}"
+
+  - name: cmw_query_ud_channel_ul
+    description: 查询用户自定义上行信道（返回 RB数,起始RB,调制,TBS 如 50,0,QPSK,6）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:CONNection:PCC:UDCHannels:UL?"
+
+  - name: cmw_set_ud_channel_ul
+    description: 设置用户自定义上行信道（连续分配）。数值参数，不受 RMC 授权限制；需配合 cmw_set_scheduling_type UDCHannels 生效
+    annotations:
+      destructiveHint: false
+    params:
+      - name: number_rb
+        type: integer
+        description: RB 数
+        default: 50
+      - name: start_rb
+        type: integer
+        description: 起始 RB 位置
+        default: 0
+      - name: modulation
+        type: string
+        description: 调制（QPSK, Q16, Q64, Q256）
+        default: "QPSK"
+      - name: tbs_index
+        type: integer
+        description: TBS 索引
+        default: 6
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:CONNection:PCC:UDCHannels:UL {number_rb},{start_rb},{modulation},{tbs_index}"
+
+  - name: cmw_query_ud_channel_dl
+    description: 查询用户自定义下行信道（返回 RB数,起始RB,调制,TBS）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:CONNection:PCC:UDCHannels:DL?"
+
+  - name: cmw_set_ud_channel_dl
+    description: 设置用户自定义下行信道（连续分配，任意 RB 数实测可写）。需配合调度类型 UDCHannels 生效
+    annotations:
+      destructiveHint: false
+    params:
+      - name: number_rb
+        type: integer
+        description: RB 数
+        default: 50
+      - name: start_rb
+        type: integer
+        description: 起始 RB 位置
+        default: 0
+      - name: modulation
+        type: string
+        description: 调制（QPSK, Q16, Q64, Q256）
+        default: "QPSK"
+      - name: tbs_index
+        type: integer
+        description: TBS 索引
+        default: 5
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:CONNection:PCC:UDCHannels:DL {number_rb},{start_rb},{modulation},{tbs_index}"
+
+  # ─────────────────────────────────────────────
+  # 下行功率 / 射频面板（2026-09-17 实测）
+  # ─────────────────────────────────────────────
+  - name: cmw_query_rs_epre_dl
+    description: 查询下行小区功率（RS EPRE，参考信号每资源粒子能量，dBm。本机当前 -123 dBm）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:DL:PCC:RSEPre:LEVel?"
+
+  - name: cmw_set_rs_epre_dl
+    description: 设置下行小区功率（RS EPRE，dBm）。LTE 信令没有 CELL:POWer，下行功率就是这条
+    annotations:
+      destructiveHint: false
+    params:
+      - name: power_dbm
+        type: number
+        description: RS EPRE 功率（dBm）
+        default: -123
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:DL:PCC:RSEPre:LEVel {power_dbm}"
+
+  - name: cmw_query_expected_power
+    description: 查询期望的 UE 上行输出功率（dBm，本机当前 -14.2）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:RFSettings:PCC:ENPower?"
+
+  - name: cmw_set_expected_power
+    description: 设置期望的 UE 上行输出功率（dBm）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: power_dbm
+        type: number
+        description: 期望功率（dBm）
+        default: -14.2
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:RFSettings:PCC:ENPower {power_dbm}"
+
+  - name: cmw_query_user_margin
+    description: 查询用户裕量（dB，本机当前 12.0）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:RFSettings:PCC:UMARgin?"
+
+  - name: cmw_set_user_margin
+    description: 设置用户裕量（dB）。注意是 UMARgin 不是 UMARker
+    annotations:
+      destructiveHint: false
+    params:
+      - name: margin_db
+        type: number
+        description: 裕量（dB）
+        default: 12
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:RFSettings:PCC:UMARgin {margin_db}"
+
+  - name: cmw_query_output_attenuation
+    description: 查询输出电子衰减（dB，本机当前 1.22）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:RFSettings:PCC:EATTenuation:OUTPut1?"
+
+  - name: cmw_set_output_attenuation
+    description: 设置输出电子衰减（dB）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: att_db
+        type: number
+        description: 衰减（dB）
+        default: 1.22
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:RFSettings:PCC:EATTenuation:OUTPut1 {att_db}"
+
+  - name: cmw_query_ul_qam_support
+    description: 查询上行高阶调制支持开关（QAM64=64：返回 ON/OFF。OFF 时 RMC:UL 写 Q64 报 -221）
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: qam_order
+        type: integer
+        description: 调制阶数（64 或 256）
+        default: 64
+    scpi_template:
+      query: "CONFigure:LTE:SIGN:CELL:PCC:ULSupport:QAM{qam_order}:ENABle?"
+
+  - name: cmw_enable_ul_qam
+    description: 开/关上行高阶调制支持（64QAM/256QAM）。要让 UE 用 Q64/Q256 上行必须先开
+    annotations:
+      destructiveHint: false
+    params:
+      - name: qam_order
+        type: integer
+        description: 调制阶数（64 或 256）
+        default: 64
+      - name: enable
+        type: string
+        description: ON 或 OFF
+        default: "ON"
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:CELL:PCC:ULSupport:QAM{qam_order}:ENABle {enable}"
+
+  # ─────────────────────────────────────────────
+  # Event Log（2026-09-17 固件 3.7.110 实测）
+  # LTE Signaling 应用的事件日志（连接/注册/应用启停等，小区 OFF 期间只有启动记录）。
+  # 响应格式: {时间戳, 类别(INFO/WARN/ERR...), 事件文本} 三字段一组，旧→新；
+  # ELOG:ALL 响应开头会多一个 "",CONT,"" 前导标记（continuation），解析时跳过。
+  # ─────────────────────────────────────────────
+  - name: cmw_query_event_log_last
+    description: 读取最新一条 Event Log（HRES=毫秒级时间戳，实测如 "18:34:24.984",INFO,"..."）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "SENSe:LTE:SIGN:ELOG:LAST? HRES"
+
+  - name: cmw_query_event_log_all
+    description: 读取全部 Event Log 条目（旧→新，HRES 毫秒时间戳。响应含 "",CONT,"" 前导标记，解析时跳过）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "SENSe:LTE:SIGN:ELOG:ALL? HRES"
+
+  - name: cmw_clear_event_log
+    description: 清空 Event Log
+    annotations:
+      destructiveHint: true
+    params: []
+    scpi_template:
+      write: "CLEan:LTE:SIGN:ELOG"
+
+  # ─────────────────────────────────────────────
+  # 信号路径 / 场景路由（2026-09-18 固件 3.7.110 实测）
+  # 当前场景 SCEL = '1CC - 1x1'（单载波单天线信令）。收发走哪个 RF COM 由
+  # SCELl:FLEXible 参数决定，格式 <信令单元>,<RX连接器>,<RX模块>,<TX连接器>,<TX模块>
+  # 如 SUW1,RF1C,RX1,RF1C,TX1。实测 RF2C<->RF1C 可自由切换，切换要求小区 OFF。
+  # 排查"模组不注册"先查这里：盒子在 RF2 发、模组在 RF1 听，Event Log 会零接入。
+  # ─────────────────────────────────────────────
+  - name: cmw_query_signal_path
+    description: 查询 LTE 信令当前信号路径（返回 SUW1,RF2C,RX1,RF2C,TX1 形式，即收发各走哪个 RF COM）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "ROUTe:LTE:SIGN:SCENario:SCELl:FLEXible?"
+
+  - name: cmw_set_signal_path
+    description: >
+      设置 LTE 信令信号路径（切 RF COM）。必须先用 cmw_cell_off 关小区再切换，切完重开小区。
+      连接器值形如 RF1C/RF2C（=RF1/RF2 COM 口），模块 RX1/TX1 对应信令单元 SUW1 的收发通道。
+    annotations:
+      destructiveHint: false
+    params:
+      - name: unit
+        type: string
+        description: 信令单元（本机 SUW1）
+        default: "SUW1"
+      - name: rx_connector
+        type: string
+        description: RX 连接器（RF1C, RF2C）
+        default: "RF1C"
+      - name: rx_converter
+        type: string
+        description: RX 模块（RX1）
+        default: "RX1"
+      - name: tx_connector
+        type: string
+        description: TX 连接器（RF1C, RF2C）
+        default: "RF1C"
+      - name: tx_converter
+        type: string
+        description: TX 模块（TX1）
+        default: "TX1"
+    scpi_template:
+      write: "ROUTe:LTE:SIGN:SCENario:SCELl:FLEXible {unit},{rx_connector},{rx_converter},{tx_connector},{tx_converter}"
+
+  # ─────────────────────────────────────────────
   # 连接控制命令
   # ─────────────────────────────────────────────
   - name: cmw_connect_ue
-    description: 连接 UE（建立 RRC 连接）
+    description: >
+      呼叫 UE 建立连接（ATT/已注册空闲 -> CEST）。会寻呼 UE 重建 RRC 并激活承载，
+      若用 cmw_prepare_ded_bearer 预配了专用承载则同时建立（日志可见 EPS Dedicated Bearer）。
+      UE 已 detach（ON 状态）时无法使用——附着必须由 UE 侧发起
     annotations:
       destructiveHint: false
     params: []
@@ -278,15 +695,68 @@ commands:
       write: "CALL:LTE:SIGN:PSWitched:ACTion CONNect"
 
   - name: cmw_disconnect_ue
-    description: 断开 UE 连接
+    description: >
+      断开连接释放 RRC（CEST -> ATT）。注意：仅 CEST（连接已建立）状态下有效；
+      ATT（ECM-Idle）状态下发送无任何效果、日志零新增
     annotations:
       destructiveHint: false
     params: []
     scpi_template:
       write: "CALL:LTE:SIGN:PSWitched:ACTion DISConnect"
 
+  - name: cmw_detach_ue
+    description: >
+      网络侧发起 EPS Detach（ATT/CEST -> ON）。UE 完全退网，日志出现
+      Network Originated Detach + RRC Connection Released。注意：退网后重附着必须由 UE
+      侧发起，休眠类模组可能长时间不回来（实测 4 分钟未自动重附）
+    annotations:
+      destructiveHint: true
+    params: []
+    scpi_template:
+      write: "CALL:LTE:SIGN:PSWitched:ACTion DETach"
+
+  - name: cmw_prepare_ded_bearer
+    description: >
+      预配专用承载（Profile: VOICe/VIDeo/DRAM/DRUM），随下一次 cmw_connect_ue 一并建立。
+      不预配也能 CONNect——仪器会用默认/上次配置建一条专载（实测确认）。
+      bearer_id 填 DEFBearer 查询返回值去掉两端引号的内容（本命令模板会自动加引号，
+      重复加引号会报 -103 Invalid separator）。释放随 DISConnect 自动进行
+    annotations:
+      destructiveHint: false
+    params:
+      - name: bearer_id
+        type: string
+        description: 挂靠的默认承载 ID（去引号，如 5 (cmw500.rohde-schwarz.com)）
+        default: "5 (cmw500.rohde-schwarz.com)"
+      - name: profile
+        type: string
+        description: 承载 profile（VOICe, VIDeo, DRAM, DRUM）
+        default: "DRAM"
+      - name: port_low
+        type: integer
+        description: TFT 端口下限（UL/DL 共用）
+        default: 1234
+      - name: port_high
+        type: integer
+        description: TFT 端口上限
+        default: 1234
+    scpi_template:
+      write: "PREPare:LTE:SIGN:CONNection:DEDBearer \"{bearer_id}\",{profile},{port_low},{port_high}"
+
+  - name: cmw_query_default_bearers
+    description: 查询已建立的默认承载列表（如 "5 (cmw500.rohde-schwarz.com)","6 (cmw500.rohde-schwarz.com)"）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CATalog:LTE:SIGN:CONNection:DEFBearer?"
+
   - name: cmw_query_connection_state
-    description: 查询 UE 连接状态
+    description: >
+      查询 UE 连接状态。稳态取值：OFF=小区未开 / ON=小区已开但无UE（或已退网）/
+      ATT=已附着(ECM-Idle) / CEST=连接已建立(RRC Connected)；跳变瞬间会短暂出现
+      CONN=建立中 / DISC=断开中（2026-09-18 全部实测）。模组休眠不改变 ATT，
+      退网（Detach）才回 ON
     annotations:
       readOnlyHint: true
     params: []
@@ -296,18 +766,89 @@ commands:
   # ─────────────────────────────────────────────
   # UE 能力查询（UE Capability）
   # 数据来源：UE 在 Attach/注册时通过 RRC 上报的 UE Capability Report，仪器解析后缓存——不是实时去问 UE。
-  # 前提：必须先 cmw_cell_on → 等 UE 注册成功（cmw_query_connection_state 返回 CEST/已连接）后才有有效数据；
-  #       未连接时查询会超时/报错，或返回上一台 UE 的旧缓存（不可靠）。典型用途：先读 UE 支持哪些频段，
+  # 前提：必须先 cmw_cell_on → 等 UE 注册成功后才有有效数据；
+  #       无 UE 时查询不报错但返回全 OFF（2026-09-18 实测），切勿当真。典型用途：先读 UE 支持哪些频段，
   #       再用 cmw_switch_band 只遍历支持的频段做谐波测试。
-  # 注意：此命令头依据 R&S 文档补充；补充时仪器临时离线，尚未真机验证（band/duplex 命令均已 3.5.120 实测）。
   # ─────────────────────────────────────────────
   - name: cmw_query_ue_supported_bands
-    description: 查询 UE 上报的支持频段（读取 Attach 时收到的 UE Capability Report 缓存）。必须先让 UE 注册成功再查，否则报错或返回上一台 UE 的旧数据
+    description: 查询 UE 上报的支持频段（读取 Attach 时收到的 UE Capability Report 缓存）。必须先让 UE 注册成功再查，否则返回全 OFF；返回第 i 项对应 Band i（首项占位）
     annotations:
       readOnlyHint: true
     params: []
     scpi_template:
       query: "SENSe:LTE:SIGN:UECapability:RF:SUPPorted?"
+
+  - name: cmw_query_ue_ip
+    description: 查询 CMW 分配给 UE 的 IP 地址（每条默认承载一个，如两条承载返回两个 IPv4）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "SENSe:LTE:SIGN:UESinfo:UEADdress:IPV4?"
+
+  # ─────────────────────────────────────────────
+  # 吞吐测量（2026-09-18 实测：INIT/FETC/ABORt 可用）
+  # 注意 FETC 查询会阻塞到采样窗就绪（默认配置下实测 >8s），超时要放宽；
+  # 或先用 CONF:LTE:SIGN:THRoughput:UPDate/WINDow 调小采样窗
+  # ─────────────────────────────────────────────
+  - name: cmw_init_throughput
+    description: 启动吞吐测量（查询 cmw_query_throughput_state 返回 RUN）
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template:
+      write: "INIT:LTE:SIGN:THRoughput"
+
+  - name: cmw_query_throughput
+    description: 查询当前 DL/UL 吞吐量。注意：此查询阻塞至采样窗完成，超时需放宽到 30s 以上
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "FETCh:LTE:SIGN:THRoughput?"
+
+  - name: cmw_query_throughput_state
+    description: 查询吞吐测量状态（RUN/...)
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "FETCh:LTE:SIGN:THRoughput:STATe?"
+
+  - name: cmw_abort_throughput
+    description: 中止吞吐测量
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template:
+      write: "ABORt:LTE:SIGN:THRoughput"
+
+  - name: cmw_configure_throughput
+    description: >
+      配置吞吐测量（UPDate/WINDow 单位=子帧，200=200ms；默认 UPDate 可能长达 10000，
+      会让 FETC 查询阻塞 10s+，先调小）。注意读数为 PDU 计数：模组不上传数据、
+      下行 RMC 用 MAC padding 填充时读数全 0 属正常
+    annotations:
+      destructiveHint: false
+    params:
+      - name: update_subframes
+        type: integer
+        description: 每样点子帧数（200~10000）
+        default: 200
+      - name: window_subframes
+        type: integer
+        description: 单发测量窗口（200~120000）
+        default: 2000
+      - name: repetition
+        type: string
+        description: SINGleshot 或 CONTinuous
+        default: "SINGleshot"
+      - name: timeout_s
+        type: number
+        description: 测量超时（秒）
+        default: 10
+    scpi_template:
+      write: "CONFigure:LTE:SIGN:THRoughput:UPDate {update_subframes};WINDow {window_subframes};REPetition {repetition};TOUT {timeout_s}"
 
   # ─────────────────────────────────────────────
   # 测量命令
@@ -381,3 +922,154 @@ commands:
         default: "default"
     scpi_template:
       write: "MMEMory:RCL {slot},\"{filename}\""
+
+  # ─────────────────────────────────────────────
+  # 参数关联处理器（2026-09-17 固件 3.7.110 实测沉淀）
+  # 代码见 cmw_handler.py，实现带联动校验的复合操作，详见 docs/cmw500_lte_signaling.md:
+  #   1. DL RMC 可写值受带宽限制（先改带宽再改 RB，否则 -203）——cmw_set_dl_rb 自动处理
+  #   2. UL Q64/Q256 需先开 ULSupport 开关（否则 -221）——cmw_set_ul_rb 自动处理
+  # ─────────────────────────────────────────────
+  - name: cmw_lte_snapshot
+    description: >
+      一键读取 LTE Signaling 面板全部关键状态（小区/UE状态、频段信道、带宽、调度类型、
+      RMC 上下行、RB位置、UDCHannels、功率/衰减、TPC、QAM开关、最近Event Log），
+      返回对齐文本。只读。
+    annotations:
+      readOnlyHint: true
+    params: []
+    handler: "instrument_mcp.commands.cmw_handler.cmw_lte_snapshot"
+
+  - name: cmw_set_dl_rb
+    description: >
+      设置下行 RMC RB（参数关联版）。自动执行"先改带宽再改 DL RB"：当前带宽下目标 RB
+      不可写时，auto_bandwidth=true 自动切到支持该 RB 的最小带宽（DL+UL 同步，RMC:UL/
+      UDCHannels 会被仪器自动钳位并在返回值中报告），false 则拒绝并说明可用带宽。
+    annotations:
+      destructiveHint: false
+    params:
+      - name: number_rb
+        type: string
+        description: RB 数（N25, N50, N6, N15 等）
+        default: "N50"
+      - name: modulation
+        type: string
+        description: 调制（QPSK, Q16, Q64, Q256）
+        default: "QPSK"
+      - name: tbs_index
+        type: string
+        description: TBS 索引（T1~T37 或 KEEP=仪器自动选兼容值）
+        default: "KEEP"
+      - name: auto_bandwidth
+        type: boolean
+        description: RB 与带宽不匹配时是否自动切带宽
+        default: true
+    handler: "instrument_mcp.commands.cmw_handler.cmw_set_dl_rb"
+
+  - name: cmw_set_ul_rb
+    description: >
+      设置上行 RMC RB（参数关联版）。UL RB 数不受带宽限制；选 Q64/Q256 时自动检查
+      ULSupport:QAM64/256 开关，OFF 时 auto_qam=true 自动开启（否则 -221），false 则拒绝。
+    annotations:
+      destructiveHint: false
+    params:
+      - name: number_rb
+        type: string
+        description: RB 数（N1, N25, N50, N100 等）
+        default: "N50"
+      - name: modulation
+        type: string
+        description: 调制（QPSK, Q16, Q64, Q256）
+        default: "QPSK"
+      - name: tbs_index
+        type: string
+        description: TBS 索引（T1~T37 或 KEEP=仪器自动选兼容值）
+        default: "KEEP"
+      - name: auto_qam
+        type: boolean
+        description: Q64/Q256 时是否自动开启 ULSupport 开关
+        default: true
+    handler: "instrument_mcp.commands.cmw_handler.cmw_set_ul_rb"
+
+  # ─────────────────────────────────────────────
+  # 应用切换 / 显示同步（2026-09-18 实测）
+  # 应用实例名用 cmw_query_app_name 查（本机 LTE Signaling 实例名为 SIG）。
+  # SYST:DISP:UPD ON 让 GUI 实时反映远程修改，调试时建议开着
+  # ─────────────────────────────────────────────
+  - name: cmw_query_app_name
+    description: 查询当前选中的应用实例名（实测返回 SIG = LTE Signaling）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "INSTrument:SELect?"
+
+  - name: cmw_select_app
+    description: 切换选中的应用实例（按名字）。注意：切换后所有不带实例名的指令都作用于新应用
+    annotations:
+      destructiveHint: false
+    params:
+      - name: name
+        type: string
+        description: 应用实例名（如 SIG）
+        default: "SIG"
+    scpi_template:
+      write: "INSTrument:SELect {name}"
+
+  - name: cmw_list_apps
+    description: 枚举应用实例列表（本机实测返回空串，枚举能力存疑，仅供参考）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "INSTrument:CATalog?"
+
+  - name: cmw_display_update
+    description: 设置 GUI 是否实时显示远程修改（ON 时面板跟着 SCPI 变，调试好用）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: enable
+        type: string
+        description: ON 或 OFF
+        default: "ON"
+    scpi_template:
+      write: "SYSTem:DISPlay:UPDate {enable}"
+
+  # ─────────────────────────────────────────────
+  # TPC 手动步进（功率步进测试用）
+  # ─────────────────────────────────────────────
+  - name: cmw_tpc_single_step
+    description: >
+      发一串 ±1dB TPC 步进命令并执行（1~35 步，之后保持恒定功率）。
+      适合做 UE 发射功率步进响应测试。需先把模式切到 SINGle（cmw_set_tpc_mode SINGle）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: steps
+        type: integer
+        description: 步数（1~35）
+        default: 10
+      - name: direction
+        type: string
+        description: UP 或 DOWN
+        default: "DOWN"
+    scpi_template:
+      - "CONFigure:LTE:SIGNaling:UL:PCC:PUSCh:TPC:SINGle {steps},{direction}"
+      - "CONFigure:LTE:SIGNaling:UL:PCC:PUSCh:TPC:PEXecute"
+
+  - name: cmw_wait_ue_state
+    description: >
+      轮询等待 UE 到达指定状态再返回（休眠模组搜网可长达数分钟，人工轮询不现实）。
+      target 可取 ATT/CEST/ON/OFF；超时返回当前状态。只读轮询，不发任何控制命令
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: target
+        type: string
+        description: 目标状态（ATT, CEST, ON, OFF）
+        default: "ATT"
+      - name: timeout_s
+        type: integer
+        description: 最长等待秒数
+        default: 300
+    handler: "instrument_mcp.commands.cmw_handler.cmw_wait_ue_state"
