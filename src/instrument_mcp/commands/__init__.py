@@ -53,20 +53,23 @@ def _build_pydantic_model(cmd_name: str, params: list) -> type:
 
 
 def _execute_scpi(inst, scpi: Any, kwargs: dict, entry: dict) -> str:
-    """执行 SCPI 模板，返回结果字符串。"""
+    """执行 SCPI 模板，返回结果字符串。
+
+    kwargs 必须已经过 _merge_param_defaults 合并（含 YAML 默认值）。模板一律执行
+    format：直接用未格式化模板兜底的旧行为会把 {placeholder} 原样发给仪器
+    （空 params_json 即触发，实测 CMW500 场景切换命令中招）。
+    """
     if isinstance(scpi, str):
-        formatted = scpi.format(**kwargs) if kwargs else scpi
+        formatted = scpi.format(**kwargs)
         inst.write(formatted)
         entry["status"] = "ok"
         return f"[PASS] {formatted}"
 
     elif isinstance(scpi, dict):
         if "write" in scpi:
-            w_cmd = scpi["write"].format(**kwargs) if kwargs else scpi["write"]
-            inst.write(w_cmd)
+            inst.write(scpi["write"].format(**kwargs))
         if "query" in scpi:
-            q_cmd = scpi["query"].format(**kwargs) if kwargs else scpi["query"]
-            resp = inst.query(q_cmd)
+            resp = inst.query(scpi["query"].format(**kwargs))
             entry["status"] = "ok"
             return f"[PASS] {resp}"
         entry["status"] = "ok"
@@ -74,8 +77,7 @@ def _execute_scpi(inst, scpi: Any, kwargs: dict, entry: dict) -> str:
 
     elif isinstance(scpi, list):
         for template in scpi:
-            cmd = template.format(**kwargs) if kwargs else template
-            inst.write(cmd)
+            inst.write(template.format(**kwargs))
         entry["status"] = "ok"
         return "[PASS] OK"
 
@@ -92,6 +94,16 @@ def _make_tool_handler(
     """生成 tool 的执行函数。"""
     scpi = cmd_def.get("scpi_template")
     handler = cmd_def.get("handler")  # 自定义 Python handler 路径（预留）
+    # YAML 参数默认值：params_json 缺省的参数用默认值补齐（None 表示无默认、必填）
+    param_defaults = {
+        p["name"]: p["default"] for p in cmd_def.get("params", [])
+        if "default" in p
+    }
+
+    def _merge_param_defaults(kwargs: dict) -> dict:
+        merged = dict(param_defaults)
+        merged.update({k: v for k, v in kwargs.items() if v is not None})
+        return merged
 
     async def _handler(alias: str = "default", params_json: str = "{}") -> str:
         if alias not in sessions:
@@ -104,6 +116,7 @@ def _make_tool_handler(
                 kwargs = json.loads(params_json)
             except Exception as e:
                 return f"[FAIL] params_json 解析错误: {e}"
+        kwargs = _merge_param_defaults(kwargs)
 
         # 记录调用历史
         entry = {
