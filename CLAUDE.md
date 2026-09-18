@@ -156,6 +156,34 @@ the "no mapping defined" warning each run is harmless; token survives
 reboots but not factory reset / re-binding; IP is DHCP (`--ip` to override).
 Full notes + property table: `docs/miplug_chuangmi_212a01.md`.
 
+## R&S CMW500 (cmw)
+
+无线通信测试仪 — LTE/WCDMA/GSM 信令模拟 + 测量。本机 172.22.1.3:5025
+（VISA 地址 `TCPIP0::172.22.1.3::5025::SOCKET`），固件 3.7.110。
+裸 socket 调试用 `tests/cmw500_probe.py`（`--batch status|sched|meas|cqi` 或逐条）。
+
+```
+connect(address="TCPIP::172.22.1.3::5025::SOCKET", instrument_type="cmw", alias="cmw")
+```
+
+Key tools (from `commands/cmw.yaml`, handlers in `cmw_handler.py`):
+- `cmw_lte_snapshot` — 一键面板快照（小区/UE状态/频段信道/带宽/调度/RMC/功率/Event Log）
+- `cmw_cell_on/off`, `cmw_connect_ue`, `cmw_wait_ue_state` — 小区与连接控制
+  （休眠模组搜网数分钟，等待用 cmw_wait_ue_state 轮询，别人工反复查）
+- `cmw_set_dl_rb` / `cmw_set_ul_rb` — 参数关联版 RB 设置（自动补带宽前置/自动开 QAM 开关）
+- `cmw_meas_run_once` / `cmw_meas_tx_report` — LTE Meas 单发 UE 上行测量+格式化报告
+  （EVM/频偏/功率/ACLR；需 CSPath 场景 + UE 在 CEST）
+- `cmw_cqi_set` / `cmw_cqi_stats` — CQI 动态调度（⚠ 连接中切换实测会掉链，先配后连）
+- `cmw_query_signal_path` / `cmw_set_signal_path` — RF COM 路由（"模组不注册"先查这里）
+
+Verified quirks: 无效头的查询无应答（靠超时判定），调试每条写命令跟 `SYST:ERR?`；
+DL RMC 受带宽限制（越界报 -203 文案误导）；改带宽会自动钳位 UL 配置；别发 `*RST`
+（会重置多应用配置）；LTE:SIGN/LTE:MEAS 两棵树可同时寻址（无需 INST:SEL 切换，
+且信令应用本来就不可远程选，-200）；场景切换等重写命令阻塞 2s+，超时要给足。
+Full notes: `docs/cmw500_lte_signaling.md`（信令树）、`docs/cmw500_lte_meas.md`
+（测量应用 + CQI 调度）。官方驱动 RsCmwLteSig/RsCmwLteMeas（PyPI）可当指令树参考，
+但驱动 4.0 比本机固件新，以真机为准。
+
 ## Testing
 
 ### Manual testing with MCP inspector

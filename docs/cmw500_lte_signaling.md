@@ -166,12 +166,17 @@ padding 填充时就是 0，不代表测量故障。要非零读数需要 UE 侧
 
 ### 远程应用切换与调试辅助
 
-- 应用实例名：`INSTrument:SELect?`（本机 LTE Signaling 实例名为 **SIG**）；
-  `INSTrument:SELect <名字>` 切换，切换后全部指令作用于新应用
+- 应用实例名：`INSTrument:SELect?` 返回 GUI 当前聚焦的应用（本机 SIG=LTE Signaling、
+  MEAS=LTE Meas、IQSETUPTEST）
+- **（2026-09-18 修正）`INSTrument:SELect <名字>` 只能选测量类应用**（MEAS、
+  IQSETUPTEST 可选）；信令应用写 SIG 报 -200（写 LTE Sig1/带引号形式亦被拒）。
+  好在 **LTE:SIGN 与 LTE:MEAS 两棵指令树可同时寻址，不需要切应用**——选着 MEAS
+  时信令树的查询与 CALL 动作照常生效（实测）
 - `INSTrument:CATalog?` 本机返回空串，枚举不可用（按名字切换不受影响）
 - `SYSTem:DISPlay:UPDate ON` 让 GUI 实时跟随远程修改，人机协同调试时打开
 - 模组休眠搜网可达数分钟（Detach 后 4.6 min 自动重附），等待注册用
   `cmw_wait_ue_state(target=ATT, timeout_s=300)` 轮询工具，不要反复人工查
+- 信令+测量联动、CQI 动态调度：见 `docs/cmw500_lte_meas.md`
 
 ## 参数关联规则（核心沉淀，handler 已自动化）
 
@@ -212,12 +217,14 @@ DL RMC 的 RB 数受当前 Cell Bandwidth 限制，越界写入报
 
 ## MCP 工具
 
-`src/instrument_mcp/commands/cmw.yaml`（66 条）+ `cmw_handler.py`（参数关联处理器）。
-连通后可直接调用；带关联校验的三个工具：
+`src/instrument_mcp/commands/cmw.yaml`（97 条）+ `cmw_handler.py`（参数关联处理器）。
+连通后可直接调用；带关联校验的五个工具：
 
 - `cmw_lte_snapshot` —— 一键面板快照（只读）
 - `cmw_set_dl_rb` —— 带宽优先联动版 DL RB 设置
 - `cmw_set_ul_rb` —— QAM 开关联动版 UL RB 设置
+- `cmw_meas_run_once` / `cmw_meas_tx_report` —— LTE Meas 单发测量+报告（见 cmw500_lte_meas.md）
+- `cmw_cqi_set` / `cmw_cqi_stats` —— CQI 动态调度与观察窗口（见 cmw500_lte_meas.md）
 
 回归测试：`uv run python tests/cmw_handler_smoke_test.py`
-（设计为零扰动：只做同值写入与拒绝分支验证）。
+（用例 1~7 零扰动：只做同值写入与拒绝分支验证；`--live` 追加真实单发测量）。
