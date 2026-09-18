@@ -31,7 +31,11 @@ ROUTe:LTE:MEAS:SCENario:SALone RF1C,RX1        切独立场景并指定 RF 输�
 - master 必须是**信令应用完整应用名**（本机 `LTE Sig1`）：写别名 `SIG` 报
   -222 Data out of range；名字带空格所以必须加引号
 - `ROUT:LTE:MEAS:SCENario <枚举>` **直写不合法**（-113），必须走 SALone/CSPath 子命令
-- 切换耗时 2s+（串行发命令时 err 回读要给足超时），切换对信令连接**无扰动**（实测）
+- 切换耗时 2s+ 且为异步执行，切完读回 `ROUT:LTE:MEAS:SCENario?` 确认；
+  切换对信令连接**无扰动**（实测）
+- ⚠ 排障记录：曾误判"场景切换偶发静默丢弃"，真因是 MCP 加载器旧版在空
+  params_json 时不做模板格式化、把 `{placeholder}` 原样发给仪器（已在
+  `commands/__init__.py` 修复：模板一律 format，缺省参数合并 YAML 默认值）
 - CSP 下 Meas 的频率/电平自动跟随信令（RFSettings:ENPower 保持 0 不影响测量）
 
 标准联动流程（全流程 2026-09-18 实测通过）：
@@ -89,8 +93,11 @@ ACLR: EUTRA 邻道 47.6~47.8 dB、UTRA 邻道 49~55 dB（信道功率 23.15 dBm�
 带内发射余量 +19.5 dB；频谱平坦度波纹 0.81 dB —— 全部远优于 3GPP 限值
 ```
 
-ATT（ECM-Idle）空闲态 UE 上行只有零星突发，IF Power 触发可能一直等不到 →
-测量超时。**先 CONNect 到 CEST 让 RMC 上行连续调度**，测量才稳定可复现。
+**无信号行为（实测修正）**：本固件上 MEValuation 单发在无上行信号时**不会等触发**，
+约 1s 即进入 RDY"完成"，全部数据字段 INV、可靠性指示器 =26（同步失败）。
+判读结果先看可靠性：`FETC:...:MODulation:*?` 首字段 =0 才是有效数据（`cmw_meas_tx_report`
+/`cmw_meas_run_once` 已自动检测并加 ⚠ 告警）。**要拿真实指标先 CONNect 到 CEST**
+让 RMC 上行连续调度；ATT（ECM-Idle）空闲态只有零星突发，测出来基本是无效数据。
 
 ## CQI 动态调度（含踩坑实录）
 

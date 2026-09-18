@@ -163,7 +163,8 @@ Full notes + property table: `docs/miplug_chuangmi_212a01.md`.
 裸 socket 调试用 `tests/cmw500_probe.py`（`--batch status|sched|meas|cqi` 或逐条）。
 
 ```
-connect(address="TCPIP::172.22.1.3::5025::SOCKET", instrument_type="cmw", alias="cmw")
+connect(address="TCPIP0::172.22.1.3::5025::SOCKET", instrument_type="cmw", alias="cmw")
+# 或 instrument_type="auto"（IDN 含 CMW/ROHDE 自动识别，均已注册）
 ```
 
 Key tools (from `commands/cmw.yaml`, handlers in `cmw_handler.py`):
@@ -179,10 +180,14 @@ Key tools (from `commands/cmw.yaml`, handlers in `cmw_handler.py`):
 Verified quirks: 无效头的查询无应答（靠超时判定），调试每条写命令跟 `SYST:ERR?`；
 DL RMC 受带宽限制（越界报 -203 文案误导）；改带宽会自动钳位 UL 配置；别发 `*RST`
 （会重置多应用配置）；LTE:SIGN/LTE:MEAS 两棵树可同时寻址（无需 INST:SEL 切换，
-且信令应用本来就不可远程选，-200）；场景切换等重写命令阻塞 2s+，超时要给足。
-Full notes: `docs/cmw500_lte_signaling.md`（信令树）、`docs/cmw500_lte_meas.md`
-（测量应用 + CQI 调度）。官方驱动 RsCmwLteSig/RsCmwLteMeas（PyPI）可当指令树参考，
-但驱动 4.0 比本机固件新，以真机为准。
+且信令应用本来就不可远程选，-200）；场景切换是异步重操作（2s+），切完读回确认；
+VISA 走 `TCPIP0::<ip>::5025::SOCKET`（SOCKET 资源必须设读写终止符，`instruments.py`
+已内置）。Full notes: `docs/cmw500_lte_signaling.md`（信令树）、
+`docs/cmw500_lte_meas.md`（测量应用 + CQI 调度）。官方驱动
+RsCmwLteSig/RsCmwLteMeas（PyPI）可当指令树参考，但驱动 4.0 比本机固件新，以真机为准。
+回归：`uv run python tests/cmw_handler_smoke_test.py`（零扰动，`--live` 加真测量）；
+MCP 全链路验证：`uv run python tests/cmw_mcp_integration_test.py`（FastMCP.call_tool
+驱动真机：注册完整性/VISA 连接/Meas/CQI 工具/场景往返）。
 
 ## Testing
 
