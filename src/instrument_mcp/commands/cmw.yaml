@@ -870,31 +870,201 @@ commands:
       write: "ABORT:LTE:MEASurement:MEValuation"
 
   # ─────────────────────────────────────────────
-  # 路由配置
+  # LTE Meas 测量应用（2026-09-18 固件 3.7.110 真机实测）
+  # 与 LTE:SIGN 平行的另一棵指令树，做 UE 发射机指标测量（调制质量/ACLR/SEM/平坦度），
+  # 两棵树可同时寻址（无需 INST:SEL 切换）。
+  # 场景路由（注意：ROUT:LTE:MEAS:SCENario <枚举> 直写不合法，会报 -113，
+  # 必须用 SALone / CSPath 子命令——旧版占位命令 cmw_set_meas_port 因此已删）：
+  #   CSP = Combined Signal Path，信令应用控制连接、测量应用共用 RF 测 UE 上行（首选）；
+  #         master 要填信令应用全名 "LTE Sig1"（CSPath? 返回的带引号形式，别名 SIG 不被接受 -222）
+  #   SAL = 独立非信令测量（自己配频率/电平）
+  # 状态机: OFF --INIT--> RUN --完成--> RDY（单发约 1s，RDY 后可 FETC 反复读）
+  # 触发源默认 "IF Power"；MEValuation 信道类型默认 PUSC(h)
   # ─────────────────────────────────────────────
-  - name: cmw_set_meas_port
-    description: 设置测量信号路径/端口
+  - name: cmw_meas_query_scenario
+    description: 查询 LTE Meas 场景路由（返回 SAL=独立 / CSP=信令+测量共用信号路径）
     annotations:
-      destructiveHint: false
-    params:
-      - name: scenario
-        type: string
-        description: 路由场景
-        default: "SAL"
+      readOnlyHint: true
+    params: []
     scpi_template:
-      write: "ROUTe:LTE:MEAS:SCENario {scenario}"
+      query: "ROUTe:LTE:MEAS:SCENario?"
 
-  - name: cmw_set_sign_port
-    description: 设置信令信号路径/端口
+  - name: cmw_meas_set_scenario_cspath
+    description: >
+      切到 CSP 场景（信令+测量联动首选）：信令应用控制连接，Meas 共用 RF 测 UE 上行。
+      master 必须是信令应用的完整应用名（本机 "LTE Sig1"，模板自带引号；写别名 SIG 报
+      -222）。切换耗时 2s+，切换对信令连接无扰动（实测）
     annotations:
       destructiveHint: false
     params:
-      - name: scenario
+      - name: master
         type: string
-        description: 路由场景
-        default: "SAL"
+        description: 控制信令应用的全名（本机 LTE Sig1）
+        default: "LTE Sig1"
     scpi_template:
-      write: "ROUTe:LTE:SIGN:SCENario {scenario}"
+      write: "ROUTe:LTE:MEAS:SCENario:CSPath \"{master}\""
+
+  - name: cmw_meas_set_scenario_salone
+    description: >
+      切到 SALone 独立测量场景并指定 RF 输入路径（非信令测量用；频率/电平在 Meas 应用内自配）。
+      注意会脱离信令联动，返回 CSP 需重调 cmw_meas_set_scenario_cspath
+    annotations:
+      destructiveHint: false
+    params:
+      - name: rx_connector
+        type: string
+        description: RX 连接器（RF1C, RF2C）
+        default: "RF1C"
+      - name: rx_converter
+        type: string
+        description: RX 模块（RX1）
+        default: "RX1"
+    scpi_template:
+      write: "ROUTe:LTE:MEAS:SCENario:SALone {rx_connector},{rx_converter}"
+
+  - name: cmw_meas_query_state
+    description: 查询 MEValuation 测量状态机（返回 OFF / RUN / RDY 与调整标志；RDY=结果可读）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "FETCh:LTE:MEAS:MEValuation:STATe:ALL?"
+
+  - name: cmw_meas_init
+    description: 启动 MEValuation 单发测量（UE 上行需有信号；信令 CEST + RMC 上行被调度时约 1s 完成）
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template:
+      write: "INITiate:LTE:MEAS:MEValuation"
+
+  - name: cmw_meas_stop
+    description: 停止 MEValuation 测量（实测 2026-09-18 可用）
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template:
+      write: "STOP:LTE:MEAS:MEValuation"
+
+  - name: cmw_meas_set_ctype
+    description: 设置 MEValuation 测量的上行信道类型（实测默认 PUSCh；另有 PUCCh/PRACH 等）。要与信令侧调度类型匹配（RMC/CQI 调度 → PUSCH）
+    annotations:
+      destructiveHint: false
+    params:
+      - name: ctype
+        type: string
+        description: 信道类型（PUSCh, PUCCh, PRACH）
+        default: "PUSCh"
+    scpi_template:
+      write: "CONFigure:LTE:MEAS:MEValuation:CTYPe {ctype}"
+
+  - name: cmw_meas_query_ctype
+    description: 查询 MEValuation 信道类型（返回 PUSC 缩写=PUSCH）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "CONFigure:LTE:MEAS:MEValuation:CTYPe?"
+
+  - name: cmw_meas_set_trigger_source
+    description: 设置 MEValuation 触发源（实测默认 "IF Power"，带空格故模板自带引号）。TRIG:...:CATalog? 在本固件不存在，别查目录
+    annotations:
+      destructiveHint: false
+    params:
+      - name: source
+        type: string
+        description: 触发源（IF Power）
+        default: "IF Power"
+    scpi_template:
+      write: "TRIGger:LTE:MEAS:MEValuation:SOURce \"{source}\""
+
+  - name: cmw_meas_tx_report
+    description: >
+      读取 MEValuation 全套结果并格式化（只读）：EVM/幅度/相位误差/频偏/TX功率/峰值功率/
+      IQ 失衡（29 字段）+ ACLR（含载波信道功率）+ 频谱平坦度 + 带内发射余量。
+      未测量时字段为 NAV/NCAP——正常显示不报错。先用 cmw_meas_run_once 出数
+    annotations:
+      readOnlyHint: true
+    params:
+      - name: statistic
+        type: string
+        description: 统计档（CURRent, AVERage, MAXimum）
+        default: "AVERage"
+    handler: "instrument_mcp.commands.cmw_handler.cmw_meas_tx_report"
+
+  - name: cmw_meas_run_once
+    description: >
+      一键单发 UE 上行测量（关联版）：校验 CSP 场景 → INIT → 轮询到 RDY → 返回完整格式化报告。
+      实测参考值（Cat.1 模组 +29dBm 顶格发射）：EVM RMS≈2%、频偏≈1.6Hz、ACLR 47~55dB。
+      ATT 空闲态无连续 PUSCH 会等不到触发而超时——先 CALL CONNect 到 CEST
+    annotations:
+      destructiveHint: false
+    params:
+      - name: timeout_s
+        type: integer
+        description: 等待测量完成的秒数
+        default: 15
+      - name: statistic
+        type: string
+        description: 统计档（CURRent, AVERage, MAXimum）
+        default: "AVERage"
+    handler: "instrument_mcp.commands.cmw_handler.cmw_meas_run_once"
+
+  # ─────────────────────────────────────────────
+  # CQI 动态调度（2026-09-18 实测，含风险）
+  # STYPe CQI,<mode>：TTIBased=固定CQI / FWB=跟随宽带CQI / FPMI / FCPRi / FCRI / FPRI；
+  # mode≠TTIBased 时 DL 走 FWBCqi:DL <RB>,<起始RB>,DET|UDEF，DET=自动 CQI→MCS 映射。
+  # 远程观察窗口：FETCh:LTE:SIGN:EBLer:PCC:CQIReporting:STReam1?（CQI中位值/BLER/报告数，
+  # 需先 INIT:LTE:SIGN:EBLer）+ SENSe:...:FWBCqi:DL:MCSTable:DETermined?（映射表）。
+  # 改 DL 小区功率（RS EPRE）可驱动 CQI 移动；GUI 看 MCS 跟随建议 SYST:DISP:UPD ON。
+  # ⚠ 实测风险：连接中（CEST）切换触发 RRC 重配 "Wideband CQI Reports ON"，
+  #   本机 Cat.1 模组 7s 后 UL out of Sync 掉链（CEST→ON，模组休眠重附需数分钟）。
+  #   推荐无连接时（小区 ON）先配置，再让 UE 连接
+  # ─────────────────────────────────────────────
+  - name: cmw_cqi_set
+    description: >
+      切换调度类型到 CQI 并配置下行（关联版）：STYPe CQI,<mode> + FWBCqi:DL。
+      强烈建议在无连接时调用（连接中切会 RRC 重配，本机 Cat.1 模组实测 7s 后
+      UL out of Sync 掉链）；掉链恢复用 cmw_wait_ue_state 等 ATT。
+      恢复静态调度用 cmw_set_scheduling_type RMC
+    annotations:
+      destructiveHint: false
+    params:
+      - name: mode
+        type: string
+        description: CQI 模式（TTIBased, FWB, FPMI, FCPRi, FCRI, FPRI）
+        default: "FWB"
+      - name: number_rb
+        type: integer
+        description: 下行 RB 数
+        default: 25
+      - name: start_rb
+        type: integer
+        description: 下行起始 RB
+        default: 0
+      - name: table
+        type: string
+        description: CQI→MCS 映射（DET=自动, UDEF=用户自定义）
+        default: "DET"
+    handler: "instrument_mcp.commands.cmw_handler.cmw_cqi_set"
+
+  - name: cmw_cqi_stats
+    description: >
+      读取 CQI 动态调度远程观察窗口（只读）：UE 上报 CQI 统计（中位值/±1 占比/DL BLER/
+      报告数，来自 eBLER 测量视图，OFF 时提示需 INIT:LTE:SIGN:EBLer）+
+      CQI→MCS 自动映射表。配合改 RS EPRE 观察中位值移动即"CQI 驱动 MCS"的远程验证
+    annotations:
+      readOnlyHint: true
+    params: []
+    handler: "instrument_mcp.commands.cmw_handler.cmw_cqi_stats"
+
+  - name: cmw_init_ebler
+    description: 启动信令侧 eBLER 测量（DL 调度统计/UE 应答/CQI 上报视图的数据源；CQI 统计不累积时先跑这个）
+    annotations:
+      destructiveHint: false
+    params: []
+    scpi_template:
+      write: "INITiate:LTE:SIGN:EBLer"
 
   # ─────────────────────────────────────────────
   # 文件操作
@@ -991,12 +1161,16 @@ commands:
     handler: "instrument_mcp.commands.cmw_handler.cmw_set_ul_rb"
 
   # ─────────────────────────────────────────────
-  # 应用切换 / 显示同步（2026-09-18 实测）
-  # 应用实例名用 cmw_query_app_name 查（本机 LTE Signaling 实例名为 SIG）。
+  # 应用切换 / 显示同步（2026-09-18 实测修正）
+  # ★ INST:SEL 只接受测量类应用实例（本机 MEAS / IQSETUPTEST 可选），
+  #   信令应用实例写 SIG 报 -200（各种名字形式均拒绝）——信令应用只能 GUI 选中，
+  #   掉链后仪器还会自动把焦点切回信令应用。
+  # ★ 好消息：LTE:SIGN 与 LTE:MEAS 两棵指令树可同时寻址，做信令+测量联动
+  #   根本不需要切应用（CSPath 场景 + 两棵树各自下发即可）。
   # SYST:DISP:UPD ON 让 GUI 实时反映远程修改，调试时建议开着
   # ─────────────────────────────────────────────
   - name: cmw_query_app_name
-    description: 查询当前选中的应用实例名（实测返回 SIG = LTE Signaling）
+    description: 查询 GUI 当前聚焦的应用实例名（返回 SIG=LTE Signaling / MEAS=LTE Meas / IQSETUPTEST）。注意返回的是显示名，不等于 INST:SEL 可写值（SIG 不可写回，见 cmw_select_app）
     annotations:
       readOnlyHint: true
     params: []
@@ -1004,14 +1178,17 @@ commands:
       query: "INSTrument:SELect?"
 
   - name: cmw_select_app
-    description: 切换选中的应用实例（按名字）。注意：切换后所有不带实例名的指令都作用于新应用
+    description: >
+      切换 GUI 聚焦的测量类应用实例（按名字，不带引号）。实测仅测量类应用可选
+      （MEAS、IQSETUPTEST）；信令应用（SIG）被拒 -200 Execution error，且不能加引号
+      （-158）。通常无需调用：LTE:SIGN/LTE:MEAS 指令树不依赖应用选择
     annotations:
       destructiveHint: false
     params:
       - name: name
         type: string
-        description: 应用实例名（如 SIG）
-        default: "SIG"
+        description: 测量类应用实例名（MEAS, IQSETUPTEST；信令应用不可选）
+        default: "MEAS"
     scpi_template:
       write: "INSTrument:SELect {name}"
 
@@ -1034,6 +1211,14 @@ commands:
         default: "ON"
     scpi_template:
       write: "SYSTem:DISPlay:UPDate {enable}"
+
+  - name: cmw_query_display_update
+    description: 查询 GUI 实时显示开关（返回 1=ON / 0=OFF，2026-09-18 实测存在查询形式）
+    annotations:
+      readOnlyHint: true
+    params: []
+    scpi_template:
+      query: "SYSTem:DISPlay:UPDate?"
 
   # ─────────────────────────────────────────────
   # TPC 手动步进（功率步进测试用）
